@@ -96,6 +96,19 @@ let currentMapIndex = 0;
 const players = {}; // stores all player states: { id: { id, name, color, imageUrl, x, y, targetX, targetY, chatBubble } }
 const camera = { x: 0, y: 0 };
 
+const trails = {}; // playerId -> [{ x, y, t }]
+const trailLastSample = {};
+
+const TRAIL = {
+    SPACING: 14,
+    MAX_AGE: 1750,
+    BASE_ALPHA: 0.34,
+    WIDTH: 13,
+    MAX_POINTS: 90,
+    JITTER: 4,
+    WOBBLE_STEP: 10
+};
+
 // Key states
 const keys = {
     w: false,
@@ -476,6 +489,51 @@ function connectWebSocket(roomId, password) {
         console.error('[Socket] Error:', error);
     };
 
+    function teleportToSafeZone(mapIndex) {
+        const map = MAPS[mapIndex];
+        if (!map.obstacles || map.obstacles.length === 0) return;
+
+        const r = 20;
+        let inObstacle = false;
+        
+        // Check if currently inside any obstacle
+        for (const obs of map.obstacles) {
+            if (localPlayer.x + r > obs.x && localPlayer.x - r < obs.x + obs.w &&
+                localPlayer.y + r > obs.y && localPlayer.y - r < obs.y + obs.h) {
+                inObstacle = true;
+                break;
+            }
+        }
+
+        if (inObstacle) {
+            console.log('[Map] Player stuck in obstacle, teleporting to safe zone...');
+            let found = false;
+            for (let i = 0; i < 200; i++) {
+                const rx = 100 + Math.random() * (MAP_SIZE - 200);
+                const ry = 100 + Math.random() * (MAP_SIZE - 200);
+                let clear = true;
+                for (const obs of map.obstacles) {
+                    if (rx + r > obs.x && rx - r < obs.x + obs.w &&
+                        ry + r > obs.y && ry - r < obs.y + obs.h) {
+                        clear = false;
+                        break;
+                    }
+                }
+                if (clear) {
+                    localPlayer.x = rx;
+                    localPlayer.y = ry;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                localPlayer.x = 50;
+                localPlayer.y = 50;
+            }
+            syncPosition();
+        }
+    }
+
     socket.onmessage = (event) => {
         const msg = JSON.parse(event.data);
         const data = msg.payload;
@@ -488,6 +546,7 @@ function connectWebSocket(roomId, password) {
                 
                 // Clear and repopulate existing players
                 for (const key in players) delete players[key];
+                clearAllTrails();
                 
                 if (data.players) {
                     for (const id in data.players) {
@@ -528,6 +587,7 @@ function connectWebSocket(roomId, password) {
                     currentMapIndex = data.currentMap % MAPS.length;
                     hudRoomName.innerText = `${currentRoomName} - ${MAPS[currentMapIndex].name}`;
                     document.body.style.backgroundColor = MAPS[currentMapIndex].bg;
+                    teleportToSafeZone(currentMapIndex);
                 }
                 break;
 
@@ -537,6 +597,7 @@ function connectWebSocket(roomId, password) {
                     hudRoomName.innerText = `${currentRoomName} - ${MAPS[currentMapIndex].name}`;
                     document.body.style.backgroundColor = MAPS[currentMapIndex].bg;
                     playJoinSound(); // Little beep to signify map change
+                    teleportToSafeZone(currentMapIndex);
                 }
                 break;
 
@@ -654,6 +715,7 @@ function connectWebSocket(roomId, password) {
                 // Cleanup audio analysis
                 cleanupAudioAnalysis(data.id);
 
+                clearPlayerTrail(data.id);
                 delete players[data.id];
                 updatePlayersHUD();
                 break;
@@ -1543,6 +1605,148 @@ function wrapText(ctx, text, maxWidth) {
     return lines;
 }
 
+function hexToRgba(hex, alpha) {
+    const h = hex.replace('#', '');
+    const full = h.length === 3 ? h.split('').map(c => c + c).join('') : h;
+    const r = parseInt(full.slice(0, 2), 16);
+    const g = parseInt(full.slice(2, 4), 16);
+    const b = parseInt(full.slice(4, 6), 16);
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+function lightenHex(hex, amount = 0.32) {
+    const h = hex.replace('#', '');
+    const full = h.length === 3 ? h.split('').map(c => c + c).join('') : h;
+    const r = parseInt(full.slice(0, 2), 16);
+    const g = parseInt(full.slice(2, 4), 16);
+    const b = parseInt(full.slice(4, 6), 16);
+    const mix = (channel) => Math.round(channel + (255 - channel) * amount);
+    return `#${mix(r).toString(16).padStart(2, '0')}${mix(g).toString(16).padStart(2, '0')}${mix(b).toString(16).padStart(2, '0')}`;
+}
+
+function addTrailPoint(playerId, x, y) {
+    const last = trailLastSample[playerId];
+    if (last) {
+        const dx = x - last.x;
+        const dy = y - last.y;
+        if (dx * dx + dy * dy < TRAIL.SPACING * TRAIL.SPACING) return;
+    }
+
+    if (!trails[playerId]) trails[playerId] = [];
+    trails[playerId].push({ x, y, t: performance.now() });
+    trailLastSample[playerId] = { x, y };
+}
+
+function pruneTrails() {
+    const now = performance.now();
+    for (const playerId in trails) {
+        const points = trails[playerId];
+        while (points.length > 0 && now - points[0].t > TRAIL.MAX_AGE) {
+            points.shift();
+        }
+        while (points.length > TRAIL.MAX_POINTS) {
+            points.shift();
+        }
+        if (points.length === 0) {
+            delete trails[playerId];
+        }
+    }
+}
+
+function clearPlayerTrail(playerId) {
+    delete trails[playerId];
+    delete trailLastSample[playerId];
+}
+
+function clearAllTrails() {
+    for (const key in trails) delete trails[key];
+    for (const key in trailLastSample) delete trailLastSample[key];
+}
+
+function drawWobblyTrailPath(x0, y0, x1, y1, jitter, timeOffset = 0) {
+    const dx = x1 - x0;
+    const dy = y1 - y0;
+    const distance = Math.hypot(dx, dy);
+    if (distance <= 0.001) return;
+
+    const normalX = -dy / distance;
+    const normalY = dx / distance;
+    const steps = Math.max(2, Math.ceil(distance / TRAIL.WOBBLE_STEP));
+
+    ctx.moveTo(x0, y0);
+    for (let i = 1; i <= steps; i++) {
+        const t = i / steps;
+        const edgeFade = Math.sin(Math.PI * t);
+        const wobble = (
+            Math.sin(t * 18 + timeOffset) +
+            Math.sin(t * 43 + timeOffset * 0.7) * 0.45
+        ) * jitter * edgeFade;
+
+        ctx.lineTo(
+            x0 + dx * t + normalX * wobble,
+            y0 + dy * t + normalY * wobble
+        );
+    }
+}
+
+function strokeNeonTrailSegment(x0, y0, x1, y1, color, alpha, width, timeOffset) {
+    ctx.shadowColor = color;
+
+    // Outer neon halo
+    ctx.beginPath();
+    drawWobblyTrailPath(x0, y0, x1, y1, TRAIL.JITTER * 1.2, timeOffset);
+    ctx.strokeStyle = hexToRgba(color, alpha * 0.16);
+    ctx.lineWidth = width * 2.4;
+    ctx.shadowBlur = 30 * alpha;
+    ctx.stroke();
+
+    // Mid glow
+    ctx.beginPath();
+    drawWobblyTrailPath(x0, y0, x1, y1, TRAIL.JITTER, timeOffset + 1.7);
+    ctx.strokeStyle = hexToRgba(color, alpha * 0.36);
+    ctx.lineWidth = width * 1.5;
+    ctx.shadowBlur = 18 * alpha;
+    ctx.stroke();
+
+    // Bright core
+    ctx.beginPath();
+    drawWobblyTrailPath(x0, y0, x1, y1, TRAIL.JITTER * 0.55, timeOffset + 3.1);
+    ctx.strokeStyle = hexToRgba(color, alpha * 0.78);
+    ctx.lineWidth = width * 0.45;
+    ctx.shadowBlur = 10 * alpha;
+    ctx.stroke();
+}
+
+function drawTrails() {
+    const now = performance.now();
+    ctx.lineCap = 'butt';
+    ctx.lineJoin = 'round';
+
+    for (const playerId in trails) {
+        const points = trails[playerId];
+        const player = players[playerId];
+        if (!player || points.length < 2) continue;
+
+        const color = lightenHex(player.color);
+
+        for (let i = 0; i < points.length - 1; i++) {
+            const p0 = points[i];
+            const p1 = points[i + 1];
+            const age = now - p0.t;
+            if (age > TRAIL.MAX_AGE) continue;
+
+            const alpha = TRAIL.BASE_ALPHA * (1 - age / TRAIL.MAX_AGE);
+            if (alpha <= 0) continue;
+
+            const width = TRAIL.WIDTH * (0.6 + 0.4 * alpha);
+            strokeNeonTrailSegment(p0.x, p0.y, p1.x, p1.y, color, alpha, width, now * 0.012 + i);
+        }
+    }
+
+    ctx.shadowBlur = 0;
+    ctx.shadowColor = 'transparent';
+}
+
 // Game loop physics/state updates
 function update(dt) {
     if (!isJoined) return;
@@ -1645,7 +1849,13 @@ function update(dt) {
                 p.chatBubble = null;
             }
         }
+
+        if (p.isMoving) {
+            addTrailPoint(id, p.x, p.y);
+        }
     }
+
+    pruneTrails();
 
     // 3. Collision detection between players (squares of size 40x40)
     const currentCollisions = new Set();
@@ -1750,6 +1960,9 @@ function draw() {
         }
         ctx.shadowBlur = 0;
     }
+
+    // 3.6 Draw movement trails
+    drawTrails();
 
     // 4. Draw players (boxes, name labels, and floating chat bubbles)
     for (const id in players) {
