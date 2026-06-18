@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NeonGrid 2D - Multiplayer Collaborative World</title>
+    <link rel="stylesheet" href="style.css">
+    <!-- Google Fonts for modern typography -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+</head>
+<body>
+    <!-- Setup / Character Selection Screen -->
+    <div id="setup-screen" class="setup-container">
+        <div class="glow-sphere sphere-1"></div>
+        <div class="glow-sphere sphere-2"></div>
+        
+        <div class="setup-card">
+            <div class="logo-area">
+                <span class="logo-icon">❖</span>
+                <h1>NEON<span>GRID</span></h1>
+                <p class="subtitle">Mundo 2D Colaborativo</p>
+            </div>
+            
+            <form id="setup-form" onsubmit="return false;">
+                <div class="form-group">
+                    <label for="username">Apelido (Nickname)</label>
+                    <input type="text" id="username" placeholder="Digite seu nome..." required maxlength="15" autocomplete="off">
+                </div>
+                
+                <div class="form-group">
+                    <label for="avatar-image-url">URL da Imagem do Avatar (Opcional)</label>
+                    <input type="url" id="avatar-image-url" placeholder="https://exemplo.com/foto.png" autocomplete="off">
+                </div>
+                
+                <div class="form-group">
+                    <label>Selecione a Cor do seu Avatar</label>
+                    <div class="color-palette">
+                        <button type="button" class="color-swatch active" style="--swatch-color: #00f0ff;" data-color="#00f0ff"></button>
+                        <button type="button" class="color-swatch" style="--swatch-color: #ff007f;" data-color="#ff007f"></button>
+                        <button type="button" class="color-swatch" style="--swatch-color: #39ff14;" data-color="#39ff14"></button>
+                        <button type="button" class="color-swatch" style="--swatch-color: #ffb700;" data-color="#ffb700"></button>
+                        <button type="button" class="color-swatch" style="--swatch-color: #bd00ff;" data-color="#bd00ff"></button>
+                        <button type="button" class="color-swatch" style="--swatch-color: #ff3333;" data-color="#ff3333"></button>
+                        <div class="custom-color-picker-wrapper">
+                            <input type="color" id="custom-color" value="#00f0ff">
+                            <span class="custom-picker-label">Customizar</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <button type="submit" id="btn-join" class="btn-glow">Entrar no Universo</button>
+            </form>
+            
+            <div class="instructions">
+                <p><strong>Controles:</strong> Use as teclas <span>W</span><span>A</span><span>S</span><span>D</span> ou <span>Setas</span> para mover.</p>
+                <p>Pressione <span>Enter</span> para abrir o chat e enviar mensagens.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Game Screen (Hidden initially) -->
+    <div id="game-container" class="hidden">
+        <!-- Render Game Canvas -->
+        <canvas id="game-canvas"></canvas>
+
+        <!-- Dynamic Game HUD overlay -->
+        <div class="game-hud">
+            <!-- Left Side Column -->
+            <div class="hud-column left-hud">
+                <div class="hud-panel player-info">
+                    <div class="hud-header">
+                        <span class="pulse-indicator"></span>
+                        <h3>Online</h3>
+                    </div>
+                    <div class="hud-body">
+                        <p>Jogadores ativos: <span id="player-count">1</span></p>
+                        <div id="players-list" class="players-list">
+                            <!-- Dynamic list of players -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Side Column -->
+            <div class="hud-column right-hud">
+                <div class="hud-panel voice-controls">
+                    <div class="hud-header">
+                        <span id="voice-indicator" class="pulse-indicator-voice voice-muted"></span>
+                        <h3>Voz (WebRTC)</h3>
+                    </div>
+                    <div class="hud-body">
+                        <button id="btn-toggle-mic" class="btn-hud mic-off">Permitir Microfone</button>
+                        <p class="voice-status-label">Microfone: <span id="voice-status">Desativado</span></p>
+                    </div>
+                </div>
+
+                <div class="hud-panel settings-panel">
+                    <h3>Configurações</h3>
+                    <div class="form-group-compact">
+                        <label for="hud-image-url">Atualizar URL da Imagem</label>
+                        <div class="input-with-btn">
+                            <input type="url" id="hud-image-url" placeholder="https://exemplo.com/foto.png" autocomplete="off">
+                            <button id="btn-update-image">Ok</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="hud-panel controls-helper">
+                    <h3>Instruções</h3>
+                    <ul>
+                        <li>Mover: <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> / <kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd></li>
+                        <li>Chat: Pressione <kbd>Enter</kbd></li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- Chat Overlay -->
+        <div id="chat-wrapper" class="chat-wrapper">
+            <div id="chat-input-container" class="chat-input-container hidden">
+                <span class="chat-prompt">&gt;</span>
+                <input type="text" id="chat-input" placeholder="Digite uma mensagem e aperte Enter..." maxlength="80" autocomplete="off">
+            </div>
+            <div id="chat-trigger-info" class="chat-trigger-info">
+                Pressione <span>Enter</span> para conversar
+            </div>
+        </div>
+    </div>
+
+    <script src="game.js"></script>
+</body>
+</html>
