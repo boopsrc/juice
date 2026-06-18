@@ -27,6 +27,11 @@ body, html {
     user-select: none;
 }
 
+body.chat-active,
+body.chat-active * {
+    cursor: none !important;
+}
+
 /* Hide helper utilities */
 .hidden {
     display: none !important;
@@ -1290,4 +1295,3 @@ canvas {
     background: rgba(57, 255, 20, 0.1) !important;
     color: #39ff14 !important;
 }
-

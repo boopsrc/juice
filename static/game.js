@@ -1558,6 +1558,7 @@ const chatInput = document.getElementById('chat-input');
 
 function openChat() {
     isChatting = true;
+    document.body.classList.add('chat-active');
     chatInputContainer.classList.remove('hidden');
     chatTriggerInfo.classList.add('hidden');
     chatInput.value = '';
@@ -1571,6 +1572,7 @@ function openChat() {
 
 function closeChat(sendMsg = true) {
     isChatting = false;
+    document.body.classList.remove('chat-active');
     chatInputContainer.classList.add('hidden');
     chatTriggerInfo.classList.remove('hidden');
 
@@ -1592,8 +1594,9 @@ function closeChat(sendMsg = true) {
 
 chatInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
-        closeChat(true);
         e.preventDefault();
+        e.stopPropagation();
+        closeChat(true);
     }
 });
 
