@@ -1713,12 +1713,10 @@ function draw() {
             ctx.shadowBlur = 0;
         }
 
-        ctx.restore(); // Restore player translation
-
         // Draw Player Chat Bubble (if active)
         if (p.chatBubble && p.chatBubble.timer > 0) {
             ctx.save();
-            ctx.translate(p.x, p.y + bounce);
+
             
             // Fading bubble in the last second
             let alpha = 1.0;
