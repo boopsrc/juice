@@ -25,6 +25,74 @@ const localPlayer = {
 
 let pingInterval = null;
 
+const MAPS = [
+    {
+        id: 'neon', name: 'Neon Grid',
+        bg: '#080a10', grid: 'rgba(0, 240, 255, 0.025)', border: '#00f0ff', glow: '#ff007f',
+        obstacles: [
+            // Four small corner pillars
+            { x: 300, y: 300, w: 100, h: 100 },
+            { x: 1600, y: 300, w: 100, h: 100 },
+            { x: 300, y: 1600, w: 100, h: 100 },
+            { x: 1600, y: 1600, w: 100, h: 100 },
+            // Two central barriers
+            { x: 800, y: 950, w: 400, h: 100 }
+        ]
+    },
+    {
+        id: 'lava', name: 'Lava Pit',
+        bg: '#1a0505', grid: 'rgba(255, 50, 0, 0.05)', border: '#ff3300', glow: '#ff9900',
+        obstacles: [
+            // Central lava island (safe zone cover)
+            { x: 800, y: 800, w: 400, h: 400 },
+            // Surrounding bridges/platforms
+            { x: 400, y: 900, w: 200, h: 200 },
+            { x: 1400, y: 900, w: 200, h: 200 },
+            { x: 900, y: 400, w: 200, h: 200 },
+            { x: 900, y: 1400, w: 200, h: 200 }
+        ]
+    },
+    {
+        id: 'ice', name: 'Ice Cavern',
+        bg: '#05101a', grid: 'rgba(0, 150, 255, 0.05)', border: '#00aaff', glow: '#00ffff',
+        obstacles: [
+            // Narrow icy corridors
+            { x: 200, y: 400, w: 700, h: 100 },
+            { x: 1100, y: 400, w: 700, h: 100 },
+            { x: 200, y: 1500, w: 700, h: 100 },
+            { x: 1100, y: 1500, w: 700, h: 100 },
+            { x: 950, y: 700, w: 100, h: 600 },
+            { x: 500, y: 800, w: 100, h: 400 },
+            { x: 1400, y: 800, w: 100, h: 400 }
+        ]
+    },
+    {
+        id: 'forest', name: 'Cyber Forest',
+        bg: '#051a0a', grid: 'rgba(50, 255, 50, 0.05)', border: '#33ff33', glow: '#aaff00',
+        obstacles: [
+            // Many scattered "trees"
+            { x: 300, y: 300, w: 150, h: 150 }, { x: 800, y: 250, w: 150, h: 150 }, { x: 1500, y: 300, w: 150, h: 150 },
+            { x: 400, y: 800, w: 150, h: 150 }, { x: 1400, y: 800, w: 150, h: 150 },
+            { x: 300, y: 1500, w: 150, h: 150 }, { x: 900, y: 1450, w: 150, h: 150 }, { x: 1500, y: 1500, w: 150, h: 150 },
+            { x: 900, y: 900, w: 200, h: 200 } // Big world tree
+        ]
+    },
+    {
+        id: 'arena', name: 'Deathmatch Arena',
+        bg: '#101010', grid: 'rgba(255, 255, 255, 0.05)', border: '#ffffff', glow: '#888888',
+        obstacles: [
+            // Outer cover walls
+            { x: 600, y: 400, w: 100, h: 1200 },
+            { x: 1300, y: 400, w: 100, h: 1200 },
+            { x: 400, y: 600, w: 1200, h: 100 },
+            { x: 400, y: 1300, w: 1200, h: 100 },
+            // Central cover
+            { x: 850, y: 850, w: 300, h: 300 }
+        ]
+    }
+];
+let currentMapIndex = 0;
+
 const players = {}; // stores all player states: { id: { id, name, color, imageUrl, x, y, targetX, targetY, chatBubble } }
 const camera = { x: 0, y: 0 };
 
@@ -456,6 +524,20 @@ function connectWebSocket(roomId, password) {
                 if (data.roomId) {
                     currentRoomId = data.roomId;
                 }
+                if (data.currentMap !== undefined) {
+                    currentMapIndex = data.currentMap % MAPS.length;
+                    hudRoomName.innerText = `${currentRoomName} - ${MAPS[currentMapIndex].name}`;
+                    document.body.style.backgroundColor = MAPS[currentMapIndex].bg;
+                }
+                break;
+
+            case 'change_map':
+                if (data.mapId !== undefined) {
+                    currentMapIndex = data.mapId % MAPS.length;
+                    hudRoomName.innerText = `${currentRoomName} - ${MAPS[currentMapIndex].name}`;
+                    document.body.style.backgroundColor = MAPS[currentMapIndex].bg;
+                    playJoinSound(); // Little beep to signify map change
+                }
                 break;
 
             case 'join':
@@ -839,21 +921,35 @@ async function toggleMicrophone() {
 
 btnToggleMic.addEventListener('click', toggleMicrophone);
 
-// Toggle Background Music
-btnToggleMusic.addEventListener('click', () => {
-    isMusicPlaying = !isMusicPlaying;
-    if (isMusicPlaying) {
-        bgMusic.play().catch(err => {
-            console.warn('[Sound] Failed to play background music:', err);
-        });
-        btnToggleMusic.innerText = 'Música: Ligada';
-        btnToggleMusic.className = 'btn-hud music-on';
+// Music Toggle Setup
+const btnMusic = document.getElementById('btn-toggle-music');
+btnMusic.addEventListener('click', () => {
+    if (bgMusic.paused) {
+        bgMusic.play().catch(e => console.warn('Music playback failed:', e));
+        btnMusic.innerText = 'Música: Ligada';
+        btnMusic.className = 'btn-hud music-on';
     } else {
         bgMusic.pause();
-        btnToggleMusic.innerText = 'Música: Desligada';
-        btnToggleMusic.className = 'btn-hud music-off';
+        btnMusic.innerText = 'Música: Desligada';
+        btnMusic.className = 'btn-hud mic-off';
     }
 });
+
+// Map Change Button
+const btnChangeMap = document.getElementById('btn-change-map');
+if (btnChangeMap) {
+    btnChangeMap.addEventListener('click', () => {
+        if (!socket || socket.readyState !== WebSocket.OPEN) return;
+        const nextMap = (currentMapIndex + 1) % MAPS.length;
+        socket.send(JSON.stringify({
+            type: 'change_map',
+            payload: { mapId: nextMap }
+        }));
+    });
+}
+
+// ----------------------------------------------------
+// UI Logic for Joining / Creating Rooms
 
 // Resume AudioContext on user interaction to comply with autoplay policy
 const resumeAudioOnGesture = () => {
@@ -1468,12 +1564,38 @@ function update(dt) {
         const dx = (moveX / length) * localPlayer.speed * dt;
         const dy = (moveY / length) * localPlayer.speed * dt;
 
-        localPlayer.x += dx;
-        localPlayer.y += dy;
+        let targetX = localPlayer.x + dx;
+        let targetY = localPlayer.y + dy;
 
-        // Constraint check
-        localPlayer.x = Math.max(20, Math.min(localPlayer.x, MAP_SIZE - 20));
-        localPlayer.y = Math.max(20, Math.min(localPlayer.y, MAP_SIZE - 20));
+        // Constraint check (map boundaries)
+        targetX = Math.max(20, Math.min(targetX, MAP_SIZE - 20));
+        targetY = Math.max(20, Math.min(targetY, MAP_SIZE - 20));
+
+        // Obstacles collision check
+        const map = MAPS[currentMapIndex];
+        if (map.obstacles) {
+            for (const obs of map.obstacles) {
+                const r = 20; // player radius
+                // AABB Collision test
+                if (targetX + r > obs.x && targetX - r < obs.x + obs.w &&
+                    targetY + r > obs.y && targetY - r < obs.y + obs.h) {
+                    
+                    // Simple resolution: check which axis caused the overlap
+                    const collisionX = (localPlayer.x + r > obs.x && localPlayer.x - r < obs.x + obs.w);
+                    const collisionY = (localPlayer.y + r > obs.y && localPlayer.y - r < obs.y + obs.h);
+                    
+                    if (!collisionY) targetY = localPlayer.y;
+                    else if (!collisionX) targetX = localPlayer.x;
+                    else {
+                        targetX = localPlayer.x;
+                        targetY = localPlayer.y;
+                    }
+                }
+            }
+        }
+
+        localPlayer.x = targetX;
+        localPlayer.y = targetY;
 
         // Update self in the global players storage
         if (players[localPlayer.id]) {
@@ -1559,8 +1681,12 @@ function update(dt) {
 
 // Render 2D space
 function draw() {
-    // Clear canvas
+    const map = MAPS[currentMapIndex];
+
+    // Clear canvas and fill with map background
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = map.bg;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     if (!isJoined) return;
 
@@ -1577,7 +1703,7 @@ function draw() {
     ctx.translate(-camera.x, -camera.y);
 
     // 2. Draw cyber grid lines
-    ctx.strokeStyle = 'rgba(0, 240, 255, 0.025)';
+    ctx.strokeStyle = map.grid;
     ctx.lineWidth = 1;
     const gridSpacing = 100;
     
@@ -1597,19 +1723,33 @@ function draw() {
     }
 
     // 3. Draw map boundaries double glowing neon borders
-    ctx.shadowColor = '#00f0ff';
+    ctx.shadowColor = map.border;
     ctx.shadowBlur = 10;
-    ctx.strokeStyle = 'rgba(0, 240, 255, 0.2)';
+    ctx.strokeStyle = map.grid; // inner soft border
     ctx.lineWidth = 4;
     ctx.strokeRect(0, 0, MAP_SIZE, MAP_SIZE);
 
-    ctx.shadowColor = '#ff007f';
+    ctx.shadowColor = map.glow;
     ctx.shadowBlur = 15;
-    ctx.strokeStyle = 'rgba(255, 0, 127, 0.1)';
+    ctx.strokeStyle = map.border;
     ctx.lineWidth = 2;
     ctx.strokeRect(-4, -4, MAP_SIZE + 8, MAP_SIZE + 8);
 
     ctx.shadowBlur = 0; // Reset shadow glow for avatars and text
+
+    // 3.5 Draw Obstacles
+    if (map.obstacles) {
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+        ctx.strokeStyle = map.border;
+        ctx.lineWidth = 2;
+        ctx.shadowColor = map.glow;
+        ctx.shadowBlur = 5;
+        for (const obs of map.obstacles) {
+            ctx.fillRect(obs.x, obs.y, obs.w, obs.h);
+            ctx.strokeRect(obs.x, obs.y, obs.w, obs.h);
+        }
+        ctx.shadowBlur = 0;
+    }
 
     // 4. Draw players (boxes, name labels, and floating chat bubbles)
     for (const id in players) {

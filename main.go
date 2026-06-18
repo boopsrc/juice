@@ -39,10 +39,11 @@ type Message struct {
 }
 
 type WelcomePayload struct {
-	ID       string             `json:"id"`
-	Players  map[string]*Player `json:"players"`
-	RoomID   string             `json:"roomId"`
-	RoomName string             `json:"roomName"`
+	ID         string             `json:"id"`
+	Players    map[string]*Player `json:"players"`
+	RoomID     string             `json:"roomId"`
+	RoomName   string             `json:"roomName"`
+	CurrentMap int                `json:"currentMap"`
 }
 
 type JoinPayload struct {
@@ -72,6 +73,10 @@ type PingPayload struct {
 type UpdatePingPayload struct {
 	ID   string `json:"id"`
 	Ping int    `json:"ping"`
+}
+
+type ChangeMapPayload struct {
+	MapID int `json:"mapId"`
 }
 
 type SignalPayload struct {
@@ -133,10 +138,11 @@ func (h *Hub) run() {
 			h.clients[client] = true
 
 			welcomePayload := WelcomePayload{
-				ID:       client.id,
-				Players:  h.players,
-				RoomID:   h.room.ID,
-				RoomName: h.room.Name,
+				ID:         client.id,
+				Players:    h.players,
+				RoomID:     h.room.ID,
+				RoomName:   h.room.Name,
+				CurrentMap: h.room.CurrentMap,
 			}
 			welcomePayloadJSON, err := json.Marshal(welcomePayload)
 			if err != nil {
@@ -272,6 +278,20 @@ func (h *Hub) run() {
 					}
 				}
 
+			case "change_map":
+				var payload ChangeMapPayload
+				if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+					continue
+				}
+
+				if h.room != nil {
+					h.room.manager.mu.Lock()
+					h.room.CurrentMap = payload.MapID
+					h.room.manager.mu.Unlock()
+				}
+
+				h.broadcastToAll(cm.message) // Broadcast unchanged to everyone
+
 			case "ping":
 				// Echo directly back to the sender
 				var payload PingPayload
@@ -331,13 +351,14 @@ func (h *Hub) playerCount() int {
 // ============================================================
 
 type Room struct {
-	ID        string       `json:"id"`
-	Name      string       `json:"name"`
-	IsPrivate bool         `json:"isPrivate"`
-	Password  string       `json:"-"` // never exposed via JSON
-	CreatedAt time.Time    `json:"createdAt"`
-	Hub       *Hub         `json:"-"`
-	manager   *RoomManager // back-pointer
+	ID         string       `json:"id"`
+	Name       string       `json:"name"`
+	IsPrivate  bool         `json:"isPrivate"`
+	Password   string       `json:"-"` // never exposed via JSON
+	CreatedAt  time.Time    `json:"createdAt"`
+	CurrentMap int          `json:"currentMap"`
+	Hub        *Hub         `json:"-"`
+	manager    *RoomManager // back-pointer
 }
 
 // RoomInfo is the public JSON representation for the API
@@ -369,12 +390,13 @@ func (rm *RoomManager) CreateRoom(name string, isPrivate bool, password string) 
 
 	id := generateID()
 	room := &Room{
-		ID:        id,
-		Name:      name,
-		IsPrivate: isPrivate,
-		Password:  password,
-		CreatedAt: time.Now(),
-		manager:   rm,
+		ID:         id,
+		Name:       name,
+		IsPrivate:  isPrivate,
+		Password:   password,
+		CreatedAt:  time.Now(),
+		CurrentMap: 0, // default map
+		manager:    rm,
 	}
 	room.Hub = newHub(room)
 	go room.Hub.run()
