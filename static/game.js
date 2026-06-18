@@ -405,7 +405,7 @@ const btnCopyInvite = document.getElementById('btn-copy-invite');
 const btnLeaveRoom = document.getElementById('btn-leave-room');
 const hudRoomName = document.getElementById('hud-room-name');
 const btnMobileInstructions = document.getElementById('btn-mobile-instructions');
-const controlsHelper = document.getElementById('controls-helper');
+const mobileMenuPanel = document.querySelector('.right-hud');
 const mobileJoystick = document.getElementById('mobile-joystick');
 const joystickKnob = document.getElementById('joystick-knob');
 
@@ -1596,10 +1596,10 @@ if (mobileJoystick) {
     });
 }
 
-if (btnMobileInstructions && controlsHelper) {
+if (btnMobileInstructions && mobileMenuPanel) {
     btnMobileInstructions.addEventListener('click', (e) => {
         e.preventDefault();
-        const isOpen = controlsHelper.classList.toggle('mobile-open');
+        const isOpen = mobileMenuPanel.classList.toggle('mobile-open');
         btnMobileInstructions.setAttribute('aria-expanded', String(isOpen));
         btnMobileInstructions.setAttribute('aria-label', isOpen ? 'Fechar instrucoes' : 'Abrir instrucoes');
     });

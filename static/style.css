@@ -603,21 +603,34 @@ canvas {
         right: 12px;
     }
 
-    .right-hud {
-        align-items: flex-end;
-    }
-
-    .right-hud .controls-helper {
+    .game-hud .right-hud {
         display: none;
         position: absolute;
         top: 50px;
         right: 0;
-        width: min(260px, calc(100vw - 24px));
-        max-width: none;
+        width: min(280px, calc(100vw - 24px));
+        max-height: calc(100vh - 76px);
+        overflow-y: auto;
+        align-items: flex-end;
+        gap: 10px;
+        padding-right: 2px;
+        pointer-events: auto;
     }
 
-    .right-hud .controls-helper.mobile-open {
+    .game-hud .right-hud.mobile-open {
         display: flex;
+    }
+
+    .game-hud .right-hud .hud-panel {
+        width: 100%;
+        padding: 12px 14px;
+    }
+
+    .game-hud .right-hud .controls-helper {
+        display: flex;
+        position: static;
+        width: 100%;
+        max-width: none;
     }
 
     .chat-wrapper {
