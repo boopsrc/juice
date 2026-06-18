@@ -59,12 +59,73 @@
                     </div>
                 </div>
                 
-                <button type="submit" id="btn-join" class="btn-glow">Entrar no Universo</button>
+                <button type="submit" id="btn-next-lobby" class="btn-glow">Continuar →</button>
             </form>
             
             <div class="instructions">
                 <p><strong>Controles:</strong> Use as teclas <span>W</span><span>A</span><span>S</span><span>D</span> ou <span>Setas</span> para mover.</p>
                 <p>Pressione <span>Enter</span> para abrir o chat e enviar mensagens.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Room Lobby Screen (hidden initially) -->
+    <div id="room-lobby" class="setup-container hidden">
+        <div class="glow-sphere sphere-1"></div>
+        <div class="glow-sphere sphere-2"></div>
+
+        <div class="lobby-card">
+            <div class="lobby-header">
+                <div class="lobby-title">
+                    <span class="logo-icon-sm">❖</span>
+                    <h2>SALAS</h2>
+                </div>
+                <button id="btn-back-setup" class="btn-text">← Voltar</button>
+            </div>
+
+            <!-- Create Room Section -->
+            <div class="create-room-section">
+                <h3>Criar Nova Sala</h3>
+                <form id="create-room-form" onsubmit="return false;">
+                    <div class="create-room-row">
+                        <input type="text" id="room-name-input" placeholder="Nome da sala..." maxlength="30" autocomplete="off">
+                        <div class="room-type-toggle">
+                            <label class="toggle-label">
+                                <input type="checkbox" id="room-private-toggle">
+                                <span class="toggle-slider"></span>
+                                <span class="toggle-text">Privada</span>
+                            </label>
+                        </div>
+                    </div>
+                    <div id="room-password-row" class="create-room-row hidden">
+                        <input type="text" id="room-password-input" placeholder="Senha da sala..." maxlength="20" autocomplete="off">
+                    </div>
+                    <button type="submit" id="btn-create-room" class="btn-glow-sm">Criar Sala</button>
+                </form>
+            </div>
+
+            <!-- Room List -->
+            <div class="room-list-section">
+                <div class="room-list-header">
+                    <h3>Salas Disponíveis</h3>
+                    <button id="btn-refresh-rooms" class="btn-icon" title="Atualizar lista">⟳</button>
+                </div>
+                <div id="room-list" class="room-list">
+                    <div class="room-list-empty">Carregando salas...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Password Modal -->
+        <div id="password-modal" class="modal-overlay hidden">
+            <div class="modal-card">
+                <h3>🔒 Sala Privada</h3>
+                <p>Esta sala requer uma senha para entrar.</p>
+                <input type="text" id="modal-password-input" placeholder="Digite a senha..." maxlength="20" autocomplete="off">
+                <div class="modal-actions">
+                    <button id="btn-modal-cancel" class="btn-text">Cancelar</button>
+                    <button id="btn-modal-enter" class="btn-glow-sm">Entrar</button>
+                </div>
             </div>
         </div>
     </div>
@@ -81,7 +142,7 @@
                 <div class="hud-panel player-info">
                     <div class="hud-header">
                         <span class="pulse-indicator"></span>
-                        <h3>Online</h3>
+                        <h3 id="hud-room-name">Sala</h3>
                     </div>
                     <div class="hud-body">
                         <p>Jogadores ativos: <span id="player-count">1</span></p>
@@ -116,6 +177,12 @@
                     </div>
                     <div style="margin-top: 12px;">
                         <button id="btn-toggle-music" class="btn-hud music-on">Música: Ligada</button>
+                    </div>
+                    <div style="margin-top: 8px;">
+                        <button id="btn-copy-invite" class="btn-hud invite-btn">📋 Copiar Link de Convite</button>
+                    </div>
+                    <div style="margin-top: 8px;">
+                        <button id="btn-leave-room" class="btn-hud mic-off">Sair da Sala</button>
                     </div>
                 </div>
 

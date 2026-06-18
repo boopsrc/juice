@@ -7,6 +7,11 @@ let isJoined = false;
 let socket = null;
 let isChatting = false;
 
+// Room state
+let currentRoomId = null;
+let currentRoomPassword = '';
+let currentRoomName = '';
+
 const localPlayer = {
     id: null,
     name: '',
@@ -15,7 +20,10 @@ const localPlayer = {
     x: MAP_SIZE / 2 + (Math.random() - 0.5) * 300, // spawn around center
     y: MAP_SIZE / 2 + (Math.random() - 0.5) * 300,
     speed: 280, // px per second
+    ping: 0
 };
+
+let pingInterval = null;
 
 const players = {}; // stores all player states: { id: { id, name, color, imageUrl, x, y, targetX, targetY, chatBubble } }
 const camera = { x: 0, y: 0 };
@@ -272,20 +280,42 @@ function resizeCanvas() {
 window.addEventListener('resize', resizeCanvas);
 resizeCanvas();
 
-// HTML UI Elements
+// HTML UI Elements — Setup Screen
 const setupScreen = document.getElementById('setup-screen');
 const setupForm = document.getElementById('setup-form');
 const usernameInput = document.getElementById('username');
 const lobbyImageUrlInput = document.getElementById('avatar-image-url');
-const btnJoin = document.getElementById('btn-join');
+const btnNextLobby = document.getElementById('btn-next-lobby');
 
+// HTML UI Elements — Room Lobby Screen
+const roomLobby = document.getElementById('room-lobby');
+const btnBackSetup = document.getElementById('btn-back-setup');
+const createRoomForm = document.getElementById('create-room-form');
+const roomNameInput = document.getElementById('room-name-input');
+const roomPrivateToggle = document.getElementById('room-private-toggle');
+const roomPasswordRow = document.getElementById('room-password-row');
+const roomPasswordInput = document.getElementById('room-password-input');
+const btnCreateRoom = document.getElementById('btn-create-room');
+const btnRefreshRooms = document.getElementById('btn-refresh-rooms');
+const roomListContainer = document.getElementById('room-list');
+
+// Password Modal
+const passwordModal = document.getElementById('password-modal');
+const modalPasswordInput = document.getElementById('modal-password-input');
+const btnModalCancel = document.getElementById('btn-modal-cancel');
+const btnModalEnter = document.getElementById('btn-modal-enter');
+let pendingJoinRoomId = null; // Room ID waiting for password
+
+// HTML UI Elements — Game HUD
 const btnToggleMic = document.getElementById('btn-toggle-mic');
 const voiceStatus = document.getElementById('voice-status');
 const voiceIndicator = document.getElementById('voice-indicator');
-
 const btnUpdateImage = document.getElementById('btn-update-image');
 const hudImageUrlInput = document.getElementById('hud-image-url');
 const btnToggleMusic = document.getElementById('btn-toggle-music');
+const btnCopyInvite = document.getElementById('btn-copy-invite');
+const btnLeaveRoom = document.getElementById('btn-leave-room');
+const hudRoomName = document.getElementById('hud-room-name');
 
 // Show secure context warning if WebRTC microphone access is blocked by browser policies
 if (!window.isSecureContext) {
@@ -318,42 +348,60 @@ customColorInput.addEventListener('input', (e) => {
 });
 
 // Setup WebSocket Connection
-function connectWebSocket() {
-    // Disable join until websocket is ready
-    btnJoin.disabled = true;
-    btnJoin.innerText = 'Conectando ao Servidor...';
+function connectWebSocket(roomId, password) {
+    if (!roomId) {
+        console.error('[Socket] Cannot connect without a room ID');
+        return;
+    }
+    currentRoomId = roomId;
+    currentRoomPassword = password || '';
 
     const protocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
-    const wsUrl = protocol + window.location.host + '/ws';
+    let wsUrl = protocol + window.location.host + '/ws?room=' + encodeURIComponent(roomId);
+    if (password) {
+        wsUrl += '&pwd=' + encodeURIComponent(password);
+    }
     socket = new WebSocket(wsUrl);
 
     socket.onopen = () => {
         console.log('[Socket] Connection established.');
+        
+        // Start ping interval
+        if (pingInterval) clearInterval(pingInterval);
+        pingInterval = setInterval(() => {
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({
+                    type: 'ping',
+                    payload: { timestamp: Date.now() }
+                }));
+            }
+        }, 2000);
     };
 
     socket.onclose = () => {
         console.warn('[Socket] Connection lost. Reconnecting in 3 seconds...');
         isJoined = false;
-        btnJoin.disabled = true;
-        btnJoin.innerText = 'Reconectando...';
         
+        if (pingInterval) {
+            clearInterval(pingInterval);
+            pingInterval = null;
+        }
+
         // Cleanup all peer connections on disconnect
         for (const peerId in peerConnections) {
             peerConnections[peerId].close();
             delete peerConnections[peerId];
             cleanupAudioAnalysis(peerId);
         }
-        // Clear all pending ICE candidate buffers
         for (const peerId in pendingCandidates) {
             delete pendingCandidates[peerId];
         }
         document.querySelectorAll('audio').forEach(el => el.remove());
         
-        // Show setup screen again
+        // Show lobby screen again
         document.getElementById('game-container').classList.add('hidden');
-        setupScreen.classList.remove('hidden');
-        
-        setTimeout(connectWebSocket, 3000);
+        roomLobby.classList.remove('hidden');
+        fetchRooms();
     };
 
     socket.onerror = (error) => {
@@ -386,7 +434,8 @@ function connectWebSocket() {
                             y: p.y,
                             targetX: p.x,
                             targetY: p.y,
-                            chatBubble: null
+                            chatBubble: null,
+                            ping: p.ping || 0
                         };
                         
                         // Prefetch avatar image
@@ -399,8 +448,14 @@ function connectWebSocket() {
                     }
                 }
                 
-                btnJoin.disabled = false;
-                btnJoin.innerText = 'Entrar no Universo';
+                // Update room name in HUD
+                if (data.roomName) {
+                    currentRoomName = data.roomName;
+                    hudRoomName.innerText = data.roomName;
+                }
+                if (data.roomId) {
+                    currentRoomId = data.roomId;
+                }
                 break;
 
             case 'join':
@@ -421,7 +476,8 @@ function connectWebSocket() {
                     y: data.y,
                     targetX: data.x,
                     targetY: data.y,
-                    chatBubble: null
+                    chatBubble: null,
+                    ping: data.ping || 0
                 };
 
                 // Prefetch avatar image
@@ -464,6 +520,37 @@ function connectWebSocket() {
             case 'signal':
                 if (data.from && data.signal) {
                     handleSignal(data.from, data.signal);
+                }
+                break;
+
+            case 'ping':
+                if (socket && socket.readyState === WebSocket.OPEN) {
+                    socket.send(JSON.stringify({
+                        type: 'pong',
+                        payload: { timestamp: data.timestamp }
+                    }));
+                }
+                break;
+
+            case 'pong':
+                if (data.timestamp) {
+                    const pingTime = Date.now() - data.timestamp;
+                    localPlayer.ping = pingTime;
+                    if (players[localPlayer.id]) {
+                        players[localPlayer.id].ping = pingTime;
+                    }
+                    if (socket && socket.readyState === WebSocket.OPEN) {
+                        socket.send(JSON.stringify({
+                            type: 'update_ping',
+                            payload: { ping: pingTime }
+                        }));
+                    }
+                }
+                break;
+
+            case 'update_ping':
+                if (players[data.id]) {
+                    players[data.id].ping = data.ping;
                 }
                 break;
 
@@ -580,24 +667,22 @@ function createPeerConnection(peerId) {
         }
     };
 
+    pc.makingOffer = false;
+    pc.ignoreOffer = false;
+
     pc.onnegotiationneeded = async () => {
-        if (pc.signalingState !== 'stable') {
-            console.log(`[WebRTC] Deferring negotiation for ${peerId} because signalingState is ${pc.signalingState}`);
-            return;
-        }
-        // Glare prevention: only the peer with lexicographically smaller ID initiates offers
-        if (localPlayer.id < peerId) {
-            try {
-                console.log(`[WebRTC] Negotiation needed. Creating offer for: ${peerId}`);
-                const offer = await pc.createOffer();
-                await pc.setLocalDescription(offer);
-                sendSignal(peerId, { sdp: pc.localDescription });
-            } catch (err) {
-                console.error('[WebRTC] Offer generation error:', err);
-            }
-        } else {
-            console.log(`[WebRTC] Negotiation needed. Sending renegotiation request to: ${peerId}`);
-            sendSignal(peerId, { renegotiate: true });
+        try {
+            pc.makingOffer = true;
+            console.log(`[WebRTC] Negotiation needed for: ${peerId}`);
+            // Force offerToReceiveAudio so that audio is always bidirectional even if mic is muted
+            const offer = await pc.createOffer({ offerToReceiveAudio: true });
+            if (pc.signalingState !== 'stable') return;
+            await pc.setLocalDescription(offer);
+            sendSignal(peerId, { sdp: pc.localDescription });
+        } catch (err) {
+            console.error('[WebRTC] Offer generation error:', err);
+        } finally {
+            pc.makingOffer = false;
         }
     };
 
@@ -621,30 +706,29 @@ async function handleSignal(from, signal) {
     const pc = createPeerConnection(from);
 
     try {
-        if (signal.renegotiate) {
-            if (localPlayer.id < from) {
-                if (pc.signalingState !== 'stable') {
-                    console.log(`[WebRTC] Peer ${from} requested renegotiation but signalingState is ${pc.signalingState}. Ignoring.`);
-                    return;
-                }
-                console.log(`[WebRTC] Peer ${from} requested renegotiation. Creating offer.`);
-                const offer = await pc.createOffer();
-                await pc.setLocalDescription(offer);
-                sendSignal(from, { sdp: pc.localDescription });
-            }
-            return;
-        }
-
         if (signal.sdp) {
             console.log(`[WebRTC] Setting remote SDP (${signal.sdp.type}) from peer: ${from}`);
+            const description = new RTCSessionDescription(signal.sdp);
             
-            // Handle glare: if we receive an offer while not stable, rollback
-            if (signal.sdp.type === 'offer' && pc.signalingState !== 'stable') {
-                console.log(`[WebRTC] Glare detected with ${from} (state: ${pc.signalingState}). Rolling back...`);
-                await pc.setLocalDescription({ type: 'rollback' });
+            // Perfect Negotiation Logic
+            const polite = localPlayer.id > from;
+            const offerCollision = description.type === 'offer' && (pc.makingOffer || pc.signalingState !== 'stable');
+            
+            pc.ignoreOffer = !polite && offerCollision;
+            if (pc.ignoreOffer) {
+                console.log(`[WebRTC] Ignoring colliding offer from ${from} (impolite)`);
+                return;
             }
             
-            await pc.setRemoteDescription(new RTCSessionDescription(signal.sdp));
+            if (offerCollision) {
+                console.log(`[WebRTC] Collision resolved by rolling back (polite)`);
+                await Promise.all([
+                    pc.setLocalDescription({ type: 'rollback' }),
+                    pc.setRemoteDescription(description)
+                ]);
+            } else {
+                await pc.setRemoteDescription(description);
+            }
             
             // Flush any buffered ICE candidates now that remote description is set
             if (pendingCandidates[from] && pendingCandidates[from].length > 0) {
@@ -659,20 +743,26 @@ async function handleSignal(from, signal) {
                 pendingCandidates[from] = [];
             }
             
-            if (signal.sdp.type === 'offer') {
+            if (description.type === 'offer') {
                 const answer = await pc.createAnswer();
                 await pc.setLocalDescription(answer);
                 sendSignal(from, { sdp: pc.localDescription });
             }
         } else if (signal.candidate) {
-            // Buffer ICE candidates if remote description hasn't been set yet
-            if (!pc.remoteDescription || !pc.remoteDescription.type) {
-                console.log(`[WebRTC] Buffering ICE candidate from ${from} (no remote description yet)`);
-                if (!pendingCandidates[from]) pendingCandidates[from] = [];
-                pendingCandidates[from].push(signal.candidate);
-            } else {
-                console.log(`[WebRTC] Adding remote ICE candidate from peer: ${from}`);
-                await pc.addIceCandidate(new RTCIceCandidate(signal.candidate));
+            try {
+                // Try to add directly if remote description is set
+                if (pc.remoteDescription && pc.remoteDescription.type) {
+                    console.log(`[WebRTC] Adding remote ICE candidate from peer: ${from}`);
+                    await pc.addIceCandidate(new RTCIceCandidate(signal.candidate));
+                } else {
+                    throw new Error('Remote description not set');
+                }
+            } catch (err) {
+                if (!pc.ignoreOffer) {
+                    console.log(`[WebRTC] Buffering ICE candidate from ${from}`);
+                    if (!pendingCandidates[from]) pendingCandidates[from] = [];
+                    pendingCandidates[from].push(signal.candidate);
+                }
             }
         }
     } catch (err) {
@@ -772,6 +862,12 @@ const resumeAudioOnGesture = () => {
             console.log('[AudioContext] Resumed AudioContext via user interaction.');
         });
     }
+    // Also attempt to play any HTML5 audio tags that were blocked by autoplay policy
+    document.querySelectorAll('audio').forEach(audioEl => {
+        if (audioEl.paused && audioEl.srcObject) {
+            audioEl.play().catch(() => {});
+        }
+    });
 };
 window.addEventListener('click', resumeAudioOnGesture);
 window.addEventListener('keydown', resumeAudioOnGesture);
@@ -808,30 +904,106 @@ btnUpdateImage.addEventListener('click', () => {
     console.log('[HUD Settings] Updated own avatar image to:', newUrl);
 });
 
-// Handle lobby submission
-setupForm.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const nickname = usernameInput.value.trim();
-    const imageUrl = lobbyImageUrlInput.value.trim();
-    if (!nickname || !localPlayer.id) return;
+// ============================================================
+// ROOM LOBBY LOGIC
+// ============================================================
 
-    btnJoin.disabled = true;
-    btnJoin.innerText = 'Permitindo microfone...';
+// Fetch available rooms from the server
+async function fetchRooms() {
+    try {
+        const res = await fetch('/api/rooms');
+        const rooms = await res.json();
+        renderRoomList(rooms);
+    } catch (err) {
+        console.error('[Lobby] Failed to fetch rooms:', err);
+        roomListContainer.innerHTML = '<div class="room-list-empty">Erro ao carregar salas.</div>';
+    }
+}
 
-    // 1. Prompt for mic access at the very beginning to configure peer connections properly
+function renderRoomList(rooms) {
+    if (!rooms || rooms.length === 0) {
+        roomListContainer.innerHTML = '<div class="room-list-empty">Nenhuma sala criada ainda. Crie a primeira!</div>';
+        return;
+    }
+
+    roomListContainer.innerHTML = rooms.map(room => `
+        <div class="room-item" data-room-id="${room.id}" data-private="${room.isPrivate}">
+            <div class="room-item-info">
+                <div class="room-item-name">${escapeHtml(room.name)}</div>
+                <div class="room-item-meta">
+                    <span class="room-badge ${room.isPrivate ? 'private' : 'public'}">
+                        ${room.isPrivate ? '🔒 Privada' : '🌐 Pública'}
+                    </span>
+                    <span class="room-players-count">${room.playerCount} jogador${room.playerCount !== 1 ? 'es' : ''}</span>
+                </div>
+            </div>
+            <div class="room-item-action">
+                <button class="btn-join-room" onclick="event.stopPropagation(); handleJoinRoomClick('${room.id}', ${room.isPrivate})">Entrar</button>
+            </div>
+        </div>
+    `).join('');
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// Create a new room
+async function createRoom(name, isPrivate, password) {
+    try {
+        btnCreateRoom.disabled = true;
+        btnCreateRoom.innerText = 'Criando...';
+
+        const res = await fetch('/api/rooms', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, isPrivate, password })
+        });
+
+        if (!res.ok) {
+            throw new Error('Failed to create room');
+        }
+
+        const room = await res.json();
+        console.log('[Lobby] Room created:', room);
+
+        // Auto-join the room we just created
+        joinRoom(room.id, isPrivate ? password : '');
+    } catch (err) {
+        console.error('[Lobby] Failed to create room:', err);
+        alert('Erro ao criar sala. Tente novamente.');
+    } finally {
+        btnCreateRoom.disabled = false;
+        btnCreateRoom.innerText = 'Criar Sala';
+    }
+}
+
+// Handle join room click (may prompt for password)
+function handleJoinRoomClick(roomId, isPrivate) {
+    if (isPrivate) {
+        // Show password modal
+        pendingJoinRoomId = roomId;
+        modalPasswordInput.value = '';
+        passwordModal.classList.remove('hidden');
+        modalPasswordInput.focus();
+    } else {
+        joinRoom(roomId, '');
+    }
+}
+
+// Join a room — connect WebSocket and transition to game
+async function joinRoom(roomId, password) {
+    // Prompt for mic access
     try {
         console.log('[Lobby] Prompting for microphone permission...');
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         localStream = stream;
-        isMicEnabled = false; // join muted by default for privacy/courtesy
-
-        // Disable track by default
+        isMicEnabled = false;
         stream.getTracks().forEach(t => t.enabled = false);
-
-        // Setup local volume tracking
         setupAudioAnalysis('local', localStream);
 
-        // Update Dynamic UI HUD states
         btnToggleMic.innerText = 'Ativar Microfone';
         btnToggleMic.className = 'btn-hud mic-off';
         voiceStatus.innerText = 'Mutado';
@@ -841,7 +1013,6 @@ setupForm.addEventListener('submit', async (e) => {
         console.warn('[Lobby] Microphone permission denied or unavailable:', err);
         localStream = null;
         isMicEnabled = false;
-
         btnToggleMic.disabled = true;
         btnToggleMic.innerText = 'Microfone Indisponível';
         btnToggleMic.className = 'btn-hud mic-off';
@@ -849,15 +1020,35 @@ setupForm.addEventListener('submit', async (e) => {
         voiceIndicator.className = 'pulse-indicator-voice voice-muted';
     }
 
-    // Initialize local player details
-    localPlayer.name = nickname;
+    // Connect to room WebSocket
+    connectWebSocket(roomId, password);
+
+    // Wait for WebSocket to be ready and for welcome message
+    await new Promise((resolve) => {
+        const checkReady = setInterval(() => {
+            if (localPlayer.id) {
+                clearInterval(checkReady);
+                resolve();
+            }
+        }, 100);
+        // Timeout after 5 seconds
+        setTimeout(() => {
+            clearInterval(checkReady);
+            resolve();
+        }, 5000);
+    });
+
+    if (!localPlayer.id) {
+        alert('Não foi possível conectar à sala. Tente novamente.');
+        return;
+    }
+
+    const imageUrl = lobbyImageUrlInput.value.trim();
+    localPlayer.name = usernameInput.value.trim();
     localPlayer.color = selectedColor;
     localPlayer.imageUrl = imageUrl;
-    
-    // Set initial URL inside dynamic HUD setting
     hudImageUrlInput.value = imageUrl;
 
-    // Prefetch image
     if (imageUrl) {
         getOrLoadAvatarImage(imageUrl);
     }
@@ -885,36 +1076,219 @@ setupForm.addEventListener('submit', async (e) => {
         y: localPlayer.y,
         targetX: localPlayer.x,
         targetY: localPlayer.y,
-        chatBubble: null
+        chatBubble: null,
+        ping: 0
     };
 
-    // Transition panels
+    // Transition to game
+    roomLobby.classList.add('hidden');
     setupScreen.classList.add('hidden');
     document.getElementById('game-container').classList.remove('hidden');
-    
+
+    // Update URL with room ID (without reload)
+    const newUrl = new URL(window.location);
+    newUrl.searchParams.set('room', currentRoomId);
+    window.history.replaceState({}, '', newUrl);
+
     updatePlayersHUD();
     isJoined = true;
-    
-    // Play join sound for self
+
     playJoinSound();
-    
-    // Start background music loop
+
     if (isMusicPlaying) {
         bgMusic.play().catch(err => {
             console.warn('[Sound] Background music play blocked by browser policy:', err);
         });
     }
-    
-    // Call WebRTC peer connection creation for all existing players
-    // Since localStream was set up BEFORE peer connections, tracks are attached immediately in createPeerConnection!
+
     for (const id in players) {
         if (id !== localPlayer.id) {
             createPeerConnection(id);
         }
     }
-    
+
     window.focus();
     requestAnimationFrame(gameLoop);
+}
+
+// Leave room and return to lobby
+function leaveRoom() {
+    if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.close();
+    }
+    socket = null;
+    isJoined = false;
+    localPlayer.id = null;
+    currentRoomId = null;
+    currentRoomPassword = '';
+    currentRoomName = '';
+
+    // Cleanup peer connections
+    for (const peerId in peerConnections) {
+        peerConnections[peerId].close();
+        delete peerConnections[peerId];
+        cleanupAudioAnalysis(peerId);
+    }
+    for (const peerId in pendingCandidates) {
+        delete pendingCandidates[peerId];
+    }
+    document.querySelectorAll('audio').forEach(el => el.remove());
+
+    // Clear players
+    for (const key in players) delete players[key];
+
+    // Stop background music
+    bgMusic.pause();
+    bgMusic.currentTime = 0;
+
+    // Clear URL params
+    const newUrl = new URL(window.location);
+    newUrl.searchParams.delete('room');
+    window.history.replaceState({}, '', newUrl);
+
+    // Transition back to lobby
+    document.getElementById('game-container').classList.add('hidden');
+    roomLobby.classList.remove('hidden');
+    fetchRooms();
+}
+
+// ============================================================
+// EVENT LISTENERS — Room Lobby
+// ============================================================
+
+// Step 1: Setup form → go to lobby
+setupForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const nickname = usernameInput.value.trim();
+    if (!nickname) return;
+
+    localPlayer.name = nickname;
+    localPlayer.color = selectedColor;
+    localPlayer.imageUrl = lobbyImageUrlInput.value.trim();
+
+    // Transition to lobby
+    setupScreen.classList.add('hidden');
+    roomLobby.classList.remove('hidden');
+    fetchRooms();
+});
+
+// Back button
+btnBackSetup.addEventListener('click', () => {
+    roomLobby.classList.add('hidden');
+    setupScreen.classList.remove('hidden');
+});
+
+// Toggle password field visibility
+roomPrivateToggle.addEventListener('change', () => {
+    if (roomPrivateToggle.checked) {
+        roomPasswordRow.classList.remove('hidden');
+        roomPasswordInput.focus();
+    } else {
+        roomPasswordRow.classList.add('hidden');
+        roomPasswordInput.value = '';
+    }
+});
+
+// Create room form
+createRoomForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const name = roomNameInput.value.trim() || 'Sala sem nome';
+    const isPrivate = roomPrivateToggle.checked;
+    const password = roomPasswordInput.value.trim();
+
+    if (isPrivate && !password) {
+        alert('Defina uma senha para salas privadas.');
+        return;
+    }
+
+    createRoom(name, isPrivate, password);
+});
+
+// Refresh rooms
+btnRefreshRooms.addEventListener('click', fetchRooms);
+
+// Password modal
+btnModalCancel.addEventListener('click', () => {
+    passwordModal.classList.add('hidden');
+    pendingJoinRoomId = null;
+});
+
+btnModalEnter.addEventListener('click', () => {
+    const pwd = modalPasswordInput.value.trim();
+    if (!pwd) return;
+    passwordModal.classList.add('hidden');
+    if (pendingJoinRoomId) {
+        joinRoom(pendingJoinRoomId, pwd);
+        pendingJoinRoomId = null;
+    }
+});
+
+modalPasswordInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+        e.preventDefault();
+        btnModalEnter.click();
+    }
+});
+
+// Copy invite link
+btnCopyInvite.addEventListener('click', () => {
+    if (!currentRoomId) return;
+    const url = new URL(window.location);
+    url.searchParams.set('room', currentRoomId);
+    // Remove password from invite link for security
+    url.searchParams.delete('pwd');
+    navigator.clipboard.writeText(url.toString()).then(() => {
+        btnCopyInvite.innerText = '✅ Link Copiado!';
+        btnCopyInvite.classList.add('copied');
+        setTimeout(() => {
+            btnCopyInvite.innerText = '📋 Copiar Link de Convite';
+            btnCopyInvite.classList.remove('copied');
+        }, 2000);
+    }).catch(() => {
+        // Fallback
+        prompt('Copie o link de convite:', url.toString());
+    });
+});
+
+// Leave room
+btnLeaveRoom.addEventListener('click', leaveRoom);
+
+// ============================================================
+// AUTO-JOIN via URL ?room=ID
+// ============================================================
+
+function checkAutoJoin() {
+    const params = new URLSearchParams(window.location.search);
+    const roomId = params.get('room');
+    if (roomId) {
+        // If user hasn't filled setup yet, show setup with auto-join flag
+        const nickname = usernameInput.value.trim();
+        if (!nickname) {
+            // Store room ID and wait for setup completion
+            window._autoJoinRoomId = roomId;
+            // Show setup screen normally, user needs to enter a name first
+            return;
+        }
+        // If nickname is already set, go straight to joining
+        localPlayer.name = nickname;
+        localPlayer.color = selectedColor;
+        localPlayer.imageUrl = lobbyImageUrlInput.value.trim();
+        setupScreen.classList.add('hidden');
+        joinRoom(roomId, '');
+    }
+}
+
+// Override setup form to handle auto-join
+const originalSetupListener = setupForm.onsubmit;
+setupForm.addEventListener('submit', () => {
+    if (window._autoJoinRoomId) {
+        const roomId = window._autoJoinRoomId;
+        delete window._autoJoinRoomId;
+        setTimeout(() => {
+            setupScreen.classList.add('hidden');
+            joinRoom(roomId, '');
+        }, 50);
+    }
 });
 
 // Update Side Panel Info
@@ -1328,9 +1702,23 @@ function draw() {
         ctx.fillStyle = '#ffffff';
         ctx.fillText(p.name, textXOffset, pillY);
 
+        // Draw Ping under user
+        if (p.ping !== undefined) {
+            ctx.font = 'bold 10px Outfit';
+            ctx.fillStyle = p.ping < 100 ? '#39ff14' : (p.ping < 200 ? '#ffea00' : '#ff3333');
+            ctx.textAlign = 'center';
+            ctx.shadowColor = '#000000';
+            ctx.shadowBlur = 4;
+            ctx.fillText(`${p.ping} ms`, 0, 32); // Draw below the 40x40 square
+            ctx.shadowBlur = 0;
+        }
+
+        ctx.restore(); // Restore player translation
+
         // Draw Player Chat Bubble (if active)
         if (p.chatBubble && p.chatBubble.timer > 0) {
             ctx.save();
+            ctx.translate(p.x, p.y + bounce);
             
             // Fading bubble in the last second
             let alpha = 1.0;
@@ -1413,5 +1801,5 @@ function gameLoop(timestamp) {
     }
 }
 
-// Bootstrap
-connectWebSocket();
+// Bootstrap — check if URL contains ?room=ID for auto-join
+checkAutoJoin();
