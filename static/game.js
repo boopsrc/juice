@@ -50,6 +50,11 @@ function initAudioContext() {
         audioContext = new (window.AudioContext || window.webkitAudioContext)();
         console.log('[AudioAnalysis] AudioContext initialized.');
     }
+    if (audioContext && audioContext.state === 'suspended') {
+        audioContext.resume().then(() => {
+            console.log('[AudioAnalysis] AudioContext resumed successfully.');
+        });
+    }
 }
 
 function setupAudioAnalysis(peerId, stream) {
@@ -62,6 +67,13 @@ function setupAudioAnalysis(peerId, stream) {
         const analyser = audioContext.createAnalyser();
         analyser.fftSize = 256;
         source.connect(analyser);
+        
+        // Connect to destination ONLY if it is a remote peer (so we can hear them)
+        // DO NOT connect local stream to destination (to avoid hearing your own voice echo)
+        if (peerId !== 'local') {
+            analyser.connect(audioContext.destination);
+            console.log(`[AudioAnalysis] Routed remote peer ${peerId} stream directly to speakers.`);
+        }
         
         const bufferLength = analyser.frequencyBinCount;
         const dataArray = new Uint8Array(bufferLength);
@@ -573,11 +585,45 @@ btnUpdateImage.addEventListener('click', () => {
 });
 
 // Handle lobby submission
-setupForm.addEventListener('submit', (e) => {
+setupForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const nickname = usernameInput.value.trim();
     const imageUrl = lobbyImageUrlInput.value.trim();
     if (!nickname || !localPlayer.id) return;
+
+    btnJoin.disabled = true;
+    btnJoin.innerText = 'Permitindo microfone...';
+
+    // 1. Prompt for mic access at the very beginning to configure peer connections properly
+    try {
+        console.log('[Lobby] Prompting for microphone permission...');
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        localStream = stream;
+        isMicEnabled = false; // join muted by default for privacy/courtesy
+
+        // Disable track by default
+        stream.getTracks().forEach(t => t.enabled = false);
+
+        // Setup local volume tracking
+        setupAudioAnalysis('local', localStream);
+
+        // Update Dynamic UI HUD states
+        btnToggleMic.innerText = 'Ativar Microfone';
+        btnToggleMic.className = 'btn-hud mic-off';
+        voiceStatus.innerText = 'Mutado';
+        voiceIndicator.className = 'pulse-indicator-voice voice-muted';
+        console.log('[Lobby] Microphone permission granted. Starting muted.');
+    } catch (err) {
+        console.warn('[Lobby] Microphone permission denied or unavailable:', err);
+        localStream = null;
+        isMicEnabled = false;
+
+        btnToggleMic.disabled = true;
+        btnToggleMic.innerText = 'Microfone Indisponível';
+        btnToggleMic.className = 'btn-hud mic-off';
+        voiceStatus.innerText = 'Desativado';
+        voiceIndicator.className = 'pulse-indicator-voice voice-muted';
+    }
 
     // Initialize local player details
     localPlayer.name = nickname;
@@ -624,6 +670,14 @@ setupForm.addEventListener('submit', (e) => {
     
     updatePlayersHUD();
     isJoined = true;
+    
+    // Call WebRTC peer connection creation for all existing players
+    // Since localStream was set up BEFORE peer connections, tracks are attached immediately in createPeerConnection!
+    for (const id in players) {
+        if (id !== localPlayer.id) {
+            createPeerConnection(id);
+        }
+    }
     
     window.focus();
     requestAnimationFrame(gameLoop);

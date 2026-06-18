@@ -1,0 +1,9 @@
+services:
+  neongrid:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: neongrid-universe
+    ports:
+      - "80:8080"
+    restart: unless-stopped
