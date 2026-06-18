@@ -120,6 +120,7 @@ const keys = {
     ArrowLeft: false,
     ArrowRight: false
 };
+const mobileMove = { x: 0, y: 0 };
 
 // WebRTC variables
 let localStream = null;
@@ -403,6 +404,10 @@ const btnToggleMusic = document.getElementById('btn-toggle-music');
 const btnCopyInvite = document.getElementById('btn-copy-invite');
 const btnLeaveRoom = document.getElementById('btn-leave-room');
 const hudRoomName = document.getElementById('hud-room-name');
+const btnMobileInstructions = document.getElementById('btn-mobile-instructions');
+const controlsHelper = document.getElementById('controls-helper');
+const mobileJoystick = document.getElementById('mobile-joystick');
+const joystickKnob = document.getElementById('joystick-knob');
 
 // Show secure context warning if WebRTC microphone access is blocked by browser policies
 if (!window.isSecureContext) {
@@ -1544,6 +1549,62 @@ window.addEventListener('keyup', (e) => {
     }
 });
 
+function resetMobileJoystick() {
+    mobileMove.x = 0;
+    mobileMove.y = 0;
+    if (joystickKnob) {
+        joystickKnob.style.transform = 'translate(-50%, -50%)';
+    }
+}
+
+function updateMobileJoystick(pointerEvent) {
+    if (!mobileJoystick || !joystickKnob || isChatting) return;
+
+    const rect = mobileJoystick.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+    const maxRadius = rect.width * 0.34;
+    const rawX = pointerEvent.clientX - centerX;
+    const rawY = pointerEvent.clientY - centerY;
+    const distance = Math.hypot(rawX, rawY);
+    const clampedDistance = Math.min(distance, maxRadius);
+    const angle = Math.atan2(rawY, rawX);
+    const knobX = Math.cos(angle) * clampedDistance;
+    const knobY = Math.sin(angle) * clampedDistance;
+
+    mobileMove.x = maxRadius > 0 ? knobX / maxRadius : 0;
+    mobileMove.y = maxRadius > 0 ? knobY / maxRadius : 0;
+    joystickKnob.style.transform = `translate(calc(-50% + ${knobX}px), calc(-50% + ${knobY}px))`;
+}
+
+if (mobileJoystick) {
+    mobileJoystick.addEventListener('pointerdown', (e) => {
+        if (isChatting) return;
+        e.preventDefault();
+        mobileJoystick.setPointerCapture(e.pointerId);
+        updateMobileJoystick(e);
+    });
+
+    mobileJoystick.addEventListener('pointermove', (e) => {
+        if (!mobileJoystick.hasPointerCapture(e.pointerId)) return;
+        e.preventDefault();
+        updateMobileJoystick(e);
+    });
+
+    ['pointerup', 'pointercancel', 'lostpointercapture'].forEach(eventName => {
+        mobileJoystick.addEventListener(eventName, resetMobileJoystick);
+    });
+}
+
+if (btnMobileInstructions && controlsHelper) {
+    btnMobileInstructions.addEventListener('click', (e) => {
+        e.preventDefault();
+        const isOpen = controlsHelper.classList.toggle('mobile-open');
+        btnMobileInstructions.setAttribute('aria-expanded', String(isOpen));
+        btnMobileInstructions.setAttribute('aria-label', isOpen ? 'Fechar instrucoes' : 'Abrir instrucoes');
+    });
+}
+
 // Blur focus closure
 canvas.addEventListener('mousedown', () => {
     if (isChatting) {
@@ -1563,6 +1624,7 @@ function openChat() {
     chatTriggerInfo.classList.add('hidden');
     chatInput.value = '';
     chatInput.focus();
+    resetMobileJoystick();
     
     // Clear moving keys to avoid stuck running behavior
     for (const key in keys) {
@@ -1790,8 +1852,8 @@ function update(dt) {
     if (!isJoined) return;
 
     // 1. Calculate local player movement
-    let moveX = 0;
-    let moveY = 0;
+    let moveX = mobileMove.x;
+    let moveY = mobileMove.y;
 
     if (keys['w'] || keys['ArrowUp'] || keys['W']) moveY -= 1;
     if (keys['s'] || keys['ArrowDown'] || keys['S']) moveY += 1;

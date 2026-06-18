@@ -189,7 +189,7 @@
                     </div>
                 </div>
 
-                <div class="hud-panel controls-helper">
+                <div id="controls-helper" class="hud-panel controls-helper">
                     <h3>Instruções</h3>
                     <ul>
                         <li>Mover: <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> / <kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd></li>
@@ -207,6 +207,18 @@
             </div>
             <div id="chat-trigger-info" class="chat-trigger-info">
                 Pressione <span>Enter</span> para conversar
+            </div>
+        </div>
+
+        <button id="btn-mobile-instructions" class="mobile-menu-toggle" type="button" aria-label="Abrir instrucoes" aria-expanded="false">
+            <span></span>
+            <span></span>
+            <span></span>
+        </button>
+
+        <div id="mobile-joystick" class="mobile-joystick" aria-label="Controle de movimento">
+            <div class="joystick-base">
+                <div id="joystick-knob" class="joystick-knob"></div>
             </div>
         </div>
     </div>
