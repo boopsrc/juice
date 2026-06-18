@@ -16,7 +16,7 @@ const (
 	writeWait      = 10 * time.Second
 	pongWait       = 60 * time.Second
 	pingPeriod     = (pongWait * 9) / 10
-	maxMessageSize = 1024 // increased slightly for safety with longer chat messages
+	maxMessageSize = 65536 // Increased to support large WebRTC SDP messages safely
 )
 
 var upgrader = websocket.Upgrader{
@@ -249,8 +249,7 @@ func (h *Hub) run() {
 						select {
 						case client.send <- newMsgBytes:
 						default:
-							close(client.send)
-							delete(h.clients, client)
+							client.conn.Close()
 						}
 						break
 					}
@@ -265,8 +264,7 @@ func (h *Hub) broadcastToAll(message []byte) {
 		select {
 		case client.send <- message:
 		default:
-			close(client.send)
-			delete(h.clients, client)
+			client.conn.Close()
 		}
 	}
 }

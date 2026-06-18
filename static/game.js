@@ -45,6 +45,61 @@ const iceServers = [
 let audioContext = null;
 const speechDetectors = {}; // peerId -> { analyser, dataArray, source }
 
+// Sound effects
+const collisionSound = new Audio('slide-release-2.mp3');
+collisionSound.volume = 0.5;
+
+function playCollisionSound() {
+    try {
+        const sound = collisionSound.cloneNode();
+        sound.volume = 0.5;
+        sound.play().catch(err => {
+            console.warn('[Sound] Collision sound play blocked by browser policy:', err);
+        });
+    } catch (e) {
+        console.warn('[Sound] Error playing collision sound:', e);
+    }
+}
+
+const shotSound = new Audio('shot-3.mp3');
+shotSound.volume = 0.5;
+
+function playShotSound() {
+    try {
+        const sound = shotSound.cloneNode();
+        sound.volume = 0.5;
+        sound.play().catch(err => {
+            console.warn('[Sound] Shot sound play blocked by browser policy:', err);
+        });
+    } catch (e) {
+        console.warn('[Sound] Error playing shot sound:', e);
+    }
+}
+
+const joinSound = new Audio('hsstroke.wav');
+joinSound.volume = 0.5;
+
+function playJoinSound() {
+    try {
+        const sound = joinSound.cloneNode();
+        sound.volume = 0.5;
+        sound.play().catch(err => {
+            console.warn('[Sound] Join sound play blocked by browser policy:', err);
+        });
+    } catch (e) {
+        console.warn('[Sound] Error playing join sound:', e);
+    }
+}
+
+// Background Music setup
+const bgMusic = new Audio('loop_cminor_124bpm.wav');
+bgMusic.loop = true;
+bgMusic.volume = 0.2; // 20% of total volume
+let isMusicPlaying = true;
+
+
+const activeCollisions = new Set();
+
 function initAudioContext() {
     if (!audioContext) {
         audioContext = new (window.AudioContext || window.webkitAudioContext)();
@@ -68,11 +123,10 @@ function setupAudioAnalysis(peerId, stream) {
         analyser.fftSize = 256;
         source.connect(analyser);
         
-        // Connect to destination ONLY if it is a remote peer (so we can hear them)
-        // DO NOT connect local stream to destination (to avoid hearing your own voice echo)
+        // Do not connect to destination (speakers) here to prevent duplicate playback and echo,
+        // as the HTML5 <audio> element is unmuted and plays the sound directly.
         if (peerId !== 'local') {
-            analyser.connect(audioContext.destination);
-            console.log(`[AudioAnalysis] Routed remote peer ${peerId} stream directly to speakers.`);
+            console.log(`[AudioAnalysis] Remote peer ${peerId} stream is analyzed (sound played by HTML5 audio element).`);
         }
         
         const bufferLength = analyser.frequencyBinCount;
@@ -206,6 +260,7 @@ const voiceIndicator = document.getElementById('voice-indicator');
 
 const btnUpdateImage = document.getElementById('btn-update-image');
 const hudImageUrlInput = document.getElementById('hud-image-url');
+const btnToggleMusic = document.getElementById('btn-toggle-music');
 
 // Color Picker logic
 let selectedColor = '#00f0ff';
@@ -315,6 +370,10 @@ function connectWebSocket() {
                 
                 const isNewPlayer = !players[data.id];
                 
+                if (data.id !== localPlayer.id && isNewPlayer) {
+                    playJoinSound();
+                }
+                
                 players[data.id] = {
                     id: data.id,
                     name: data.name,
@@ -358,6 +417,9 @@ function connectWebSocket() {
                         text: data.message,
                         timer: 5.0 // display message above head for 5 seconds
                     };
+                }
+                if (data.message && data.message.trim().toLowerCase() === '/tiro') {
+                    playShotSound();
                 }
                 break;
 
@@ -433,6 +495,10 @@ function createPeerConnection(peerId) {
     };
 
     pc.onnegotiationneeded = async () => {
+        if (pc.signalingState !== 'stable') {
+            console.log(`[WebRTC] Deferring negotiation for ${peerId} because signalingState is ${pc.signalingState}`);
+            return;
+        }
         // Glare prevention: only the peer with lexicographically smaller ID initiates offers
         if (localPlayer.id < peerId) {
             try {
@@ -444,7 +510,8 @@ function createPeerConnection(peerId) {
                 console.error('[WebRTC] Offer generation error:', err);
             }
         } else {
-            console.log(`[WebRTC] Negotiation needed. Waiting for peer (${peerId}) to call.`);
+            console.log(`[WebRTC] Negotiation needed. Sending renegotiation request to: ${peerId}`);
+            sendSignal(peerId, { renegotiate: true });
         }
     };
 
@@ -457,15 +524,31 @@ function playRemoteStream(peerId, stream) {
         audio = document.createElement('audio');
         audio.id = 'audio-' + peerId;
         audio.autoplay = true;
+        audio.muted = false; // Unmuted so Chrome decodes and plays the remote WebRTC audio stream
         document.body.appendChild(audio);
     }
     audio.srcObject = stream;
+    audio.play().catch(e => console.warn('[Audio] HTML5 audio play error:', e));
 }
 
 async function handleSignal(from, signal) {
     const pc = createPeerConnection(from);
 
     try {
+        if (signal.renegotiate) {
+            if (localPlayer.id < from) {
+                if (pc.signalingState !== 'stable') {
+                    console.log(`[WebRTC] Peer ${from} requested renegotiation but signalingState is ${pc.signalingState}. Ignoring.`);
+                    return;
+                }
+                console.log(`[WebRTC] Peer ${from} requested renegotiation. Creating offer.`);
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+                sendSignal(from, { sdp: pc.localDescription });
+            }
+            return;
+        }
+
         if (signal.sdp) {
             console.log(`[WebRTC] Setting remote SDP description from peer: ${from}`);
             await pc.setRemoteDescription(new RTCSessionDescription(signal.sdp));
@@ -551,6 +634,33 @@ async function toggleMicrophone() {
 }
 
 btnToggleMic.addEventListener('click', toggleMicrophone);
+
+// Toggle Background Music
+btnToggleMusic.addEventListener('click', () => {
+    isMusicPlaying = !isMusicPlaying;
+    if (isMusicPlaying) {
+        bgMusic.play().catch(err => {
+            console.warn('[Sound] Failed to play background music:', err);
+        });
+        btnToggleMusic.innerText = 'Música: Ligada';
+        btnToggleMusic.className = 'btn-hud music-on';
+    } else {
+        bgMusic.pause();
+        btnToggleMusic.innerText = 'Música: Desligada';
+        btnToggleMusic.className = 'btn-hud music-off';
+    }
+});
+
+// Resume AudioContext on user interaction to comply with autoplay policy
+const resumeAudioOnGesture = () => {
+    if (audioContext && audioContext.state === 'suspended') {
+        audioContext.resume().then(() => {
+            console.log('[AudioContext] Resumed AudioContext via user interaction.');
+        });
+    }
+};
+window.addEventListener('click', resumeAudioOnGesture);
+window.addEventListener('keydown', resumeAudioOnGesture);
 
 // Live Image URL update from HUD
 btnUpdateImage.addEventListener('click', () => {
@@ -670,6 +780,16 @@ setupForm.addEventListener('submit', async (e) => {
     
     updatePlayersHUD();
     isJoined = true;
+    
+    // Play join sound for self
+    playJoinSound();
+    
+    // Start background music loop
+    if (isMusicPlaying) {
+        bgMusic.play().catch(err => {
+            console.warn('[Sound] Background music play blocked by browser policy:', err);
+        });
+    }
     
     // Call WebRTC peer connection creation for all existing players
     // Since localStream was set up BEFORE peer connections, tracks are attached immediately in createPeerConnection!
@@ -915,6 +1035,37 @@ function update(dt) {
                 p.chatBubble = null;
             }
         }
+    }
+
+    // 3. Collision detection between players (squares of size 40x40)
+    const currentCollisions = new Set();
+    const playerIds = Object.keys(players);
+    for (let i = 0; i < playerIds.length; i++) {
+        for (let j = i + 1; j < playerIds.length; j++) {
+            const idA = playerIds[i];
+            const idB = playerIds[j];
+            const pA = players[idA];
+            const pB = players[idB];
+            
+            // Overlap check (within 40px on both X and Y axes)
+            if (Math.abs(pA.x - pB.x) < 40 && Math.abs(pA.y - pB.y) < 40) {
+                const collisionKey = idA < idB ? `${idA}_${idB}` : `${idB}_${idA}`;
+                currentCollisions.add(collisionKey);
+            }
+        }
+    }
+    
+    // Play sound on collision start
+    for (const key of currentCollisions) {
+        if (!activeCollisions.has(key)) {
+            playCollisionSound();
+        }
+    }
+    
+    // Retain only currently active collisions
+    activeCollisions.clear();
+    for (const key of currentCollisions) {
+        activeCollisions.add(key);
     }
 }
 
