@@ -23,6 +23,15 @@
                 <p class="subtitle">Mundo 2D Colaborativo</p>
             </div>
             
+            <!-- Secure Context Warning Banner (hidden by default) -->
+            <div id="secure-context-warning" class="hidden-warning hidden">
+                <span class="warning-icon">⚠</span>
+                <div class="warning-text">
+                    <strong>Navegador Requer HTTPS</strong>
+                    <p>O navegador bloqueia o microfone na VPS sem HTTPS. Ative HTTPS ou configure a flag: <code style="word-break: break-all; font-size: 0.75rem;">chrome://flags/#unsafely-treat-insecure-origin-as-secure</code></p>
+                </div>
+            </div>
+            
             <form id="setup-form" onsubmit="return false;">
                 <div class="form-group">
                     <label for="username">Apelido (Nickname)</label>

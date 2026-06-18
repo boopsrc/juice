@@ -777,3 +777,50 @@ canvas {
     background: #5cf5ff;
     box-shadow: 0 0 8px var(--primary-glow);
 }
+
+/* Secure Context Warning CSS */
+.hidden-warning {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    background: rgba(255, 51, 85, 0.08);
+    border: 1px solid rgba(255, 51, 85, 0.4);
+    border-radius: 12px;
+    padding: 12px 16px;
+    margin-bottom: 20px;
+    animation: pulseBorder 2s infinite alternate;
+}
+
+.warning-icon {
+    font-size: 1.3rem;
+    color: #ff3355;
+    text-shadow: 0 0 8px rgba(255, 51, 85, 0.6);
+}
+
+.warning-text strong {
+    display: block;
+    font-size: 0.85rem;
+    color: #fff;
+    margin-bottom: 4px;
+}
+
+.warning-text p {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    line-height: 1.4;
+}
+
+.warning-text code {
+    display: block;
+    background: rgba(0, 0, 0, 0.3);
+    padding: 2px 6px;
+    border-radius: 4px;
+    margin-top: 4px;
+    color: #ff3355;
+    font-family: monospace;
+}
+
+@keyframes pulseBorder {
+    0% { border-color: rgba(255, 51, 85, 0.3); box-shadow: 0 0 5px rgba(255, 51, 85, 0.1); }
+    100% { border-color: rgba(255, 51, 85, 0.6); box-shadow: 0 0 15px rgba(255, 51, 85, 0.2); }
+}
