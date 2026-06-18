@@ -214,6 +214,12 @@ let isMusicPlaying = true;
 
 const activeCollisions = new Set();
 
+const SPATIAL_AUDIO = {
+    FULL_VOLUME_RANGE: 300,
+    FADE_DISTANCE: 700,
+    SMOOTHING: 0.08
+};
+
 function initAudioContext() {
     if (!audioContext) {
         audioContext = new (window.AudioContext || window.webkitAudioContext)();
@@ -840,10 +846,39 @@ function playRemoteStream(peerId, stream) {
         audio.id = 'audio-' + peerId;
         audio.autoplay = true;
         audio.muted = false; // Unmuted so Chrome decodes and plays the remote WebRTC audio stream
+        audio.volume = 1;
         document.body.appendChild(audio);
     }
     audio.srcObject = stream;
+    updateRemoteAudioVolume(peerId);
     audio.play().catch(e => console.warn('[Audio] HTML5 audio play error:', e));
+}
+
+function getSpatialAudioVolume(distance) {
+    if (distance <= SPATIAL_AUDIO.FULL_VOLUME_RANGE) return 1;
+
+    const fadeProgress = (distance - SPATIAL_AUDIO.FULL_VOLUME_RANGE) / SPATIAL_AUDIO.FADE_DISTANCE;
+    return Math.max(0, Math.min(1, 1 - fadeProgress));
+}
+
+function updateRemoteAudioVolume(peerId) {
+    if (!localPlayer.id || peerId === localPlayer.id) return;
+
+    const audio = document.getElementById('audio-' + peerId);
+    const peer = players[peerId];
+    if (!audio || !peer) return;
+
+    const dx = peer.x - localPlayer.x;
+    const dy = peer.y - localPlayer.y;
+    const distance = Math.hypot(dx, dy);
+    const targetVolume = getSpatialAudioVolume(distance);
+    audio.volume += (targetVolume - audio.volume) * SPATIAL_AUDIO.SMOOTHING;
+}
+
+function updateSpatialAudioVolumes() {
+    for (const peerId in peerConnections) {
+        updateRemoteAudioVolume(peerId);
+    }
 }
 
 async function handleSignal(from, signal) {
@@ -1855,6 +1890,7 @@ function update(dt) {
         }
     }
 
+    updateSpatialAudioVolumes();
     pruneTrails();
 
     // 3. Collision detection between players (squares of size 40x40)
