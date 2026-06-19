@@ -201,6 +201,7 @@
 
         <!-- Chat Overlay -->
         <div id="chat-wrapper" class="chat-wrapper">
+            <div id="chat-history" class="chat-history"></div>
             <div id="chat-input-container" class="chat-input-container hidden">
                 <span class="chat-prompt">&gt;</span>
                 <input type="text" id="chat-input" placeholder="Digite uma mensagem e aperte Enter..." maxlength="80" autocomplete="off">
@@ -209,6 +210,10 @@
                 Pressione <span>Enter</span> para conversar
             </div>
         </div>
+
+        <button id="btn-mobile-chat-toggle" class="mobile-chat-toggle" type="button" aria-label="Esconder/Exibir Chat">
+            💬
+        </button>
 
         <button id="btn-mobile-instructions" class="mobile-menu-toggle" type="button" aria-label="Abrir instrucoes" aria-expanded="false">
             <span></span>

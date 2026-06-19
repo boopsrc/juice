@@ -593,6 +593,7 @@ function connectWebSocket(roomId, password) {
                 }
                 if (data.roomId) {
                     currentRoomId = data.roomId;
+                    loadChatHistory(data.roomId);
                 }
                 if (data.currentMap !== undefined) {
                     currentMapIndex = data.currentMap % MAPS.length;
@@ -665,6 +666,7 @@ function connectWebSocket(roomId, password) {
                         text: data.message,
                         timer: 5.0 // display message above head for 5 seconds
                     };
+                    appendToChatHistory(sender.name, sender.color, data.message);
                 }
                 if (data.message && data.message.trim().toLowerCase() === '/tiro') {
                     playShotSound();
@@ -1335,6 +1337,10 @@ function leaveRoom() {
     // Clear players
     for (const key in players) delete players[key];
 
+    // Clear chat history DOM
+    const chatHistoryEl = document.getElementById('chat-history');
+    if (chatHistoryEl) chatHistoryEl.innerHTML = '';
+
     // Stop background music
     bgMusic.pause();
     bgMusic.currentTime = 0;
@@ -1605,6 +1611,21 @@ if (btnMobileInstructions && mobileMenuPanel) {
     });
 }
 
+// Mobile Chat Visibility Toggle
+const btnMobileChatToggle = document.getElementById('btn-mobile-chat-toggle');
+const chatWrapper = document.getElementById('chat-wrapper');
+if (btnMobileChatToggle && chatWrapper) {
+    btnMobileChatToggle.addEventListener('click', (e) => {
+        e.preventDefault();
+        const isHidden = chatWrapper.classList.toggle('chat-hidden');
+        if (isHidden) {
+            btnMobileChatToggle.classList.add('chat-muted-indicator');
+        } else {
+            btnMobileChatToggle.classList.remove('chat-muted-indicator');
+        }
+    });
+}
+
 // Blur focus closure
 canvas.addEventListener('mousedown', () => {
     if (isChatting) {
@@ -1630,6 +1651,9 @@ function openChat() {
     for (const key in keys) {
         keys[key] = false;
     }
+
+    // Reset chat history visibility/fade timer
+    resetChatFade();
 }
 
 function closeChat(sendMsg = true) {
@@ -1681,6 +1705,110 @@ function syncPosition() {
             lastSentPosition.y = localPlayer.y;
             lastSendTime = now;
         }
+    }
+}
+
+let chatFadeTimeout = null;
+
+function resetChatFade() {
+    const chatHistoryEl = document.getElementById('chat-history');
+    if (!chatHistoryEl) return;
+    chatHistoryEl.classList.remove('chat-faded');
+    if (chatFadeTimeout) clearTimeout(chatFadeTimeout);
+    chatFadeTimeout = setTimeout(() => {
+        chatHistoryEl.classList.add('chat-faded');
+    }, 6000);
+}
+
+function appendToChatHistory(senderName, senderColor, messageText) {
+    const chatHistoryEl = document.getElementById('chat-history');
+    if (!chatHistoryEl) return;
+
+    const date = new Date();
+    const timeStr = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+    const msgEl = document.createElement('div');
+    msgEl.className = 'chat-message';
+
+    const timeSpan = document.createElement('span');
+    timeSpan.className = 'chat-message-time';
+    timeSpan.innerText = `[${timeStr}]`;
+
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'chat-message-name';
+    nameSpan.style.color = senderColor || '#00f0ff';
+    nameSpan.innerText = ` ${senderName}: `;
+
+    const textSpan = document.createElement('span');
+    textSpan.className = 'chat-message-text';
+    textSpan.innerText = messageText;
+
+    msgEl.appendChild(timeSpan);
+    msgEl.appendChild(nameSpan);
+    msgEl.appendChild(textSpan);
+
+    chatHistoryEl.appendChild(msgEl);
+    chatHistoryEl.scrollTop = chatHistoryEl.scrollHeight;
+
+    // Reset the fade-out countdown timer
+    resetChatFade();
+
+    // Save to localStorage
+    if (currentRoomId) {
+        try {
+            const key = `neongrid_chat_history_${currentRoomId}`;
+            const history = JSON.parse(localStorage.getItem(key) || '[]');
+            history.push({
+                time: timeStr,
+                name: senderName,
+                color: senderColor,
+                text: messageText
+            });
+            if (history.length > 100) history.shift();
+            localStorage.setItem(key, JSON.stringify(history));
+        } catch (e) {
+            console.error('Error saving chat history to localStorage:', e);
+        }
+    }
+}
+
+function loadChatHistory(roomId) {
+    const chatHistoryEl = document.getElementById('chat-history');
+    if (!chatHistoryEl) return;
+    chatHistoryEl.innerHTML = '';
+
+    try {
+        const key = `neongrid_chat_history_${roomId}`;
+        const history = JSON.parse(localStorage.getItem(key) || '[]');
+        history.forEach(msg => {
+            const msgEl = document.createElement('div');
+            msgEl.className = 'chat-message';
+
+            const timeSpan = document.createElement('span');
+            timeSpan.className = 'chat-message-time';
+            timeSpan.innerText = `[${msg.time}]`;
+
+            const nameSpan = document.createElement('span');
+            nameSpan.className = 'chat-message-name';
+            nameSpan.style.color = msg.color || '#00f0ff';
+            nameSpan.innerText = ` ${msg.name}: `;
+
+            const textSpan = document.createElement('span');
+            textSpan.className = 'chat-message-text';
+            textSpan.innerText = msg.text;
+
+            msgEl.appendChild(timeSpan);
+            msgEl.appendChild(nameSpan);
+            msgEl.appendChild(textSpan);
+
+            chatHistoryEl.appendChild(msgEl);
+        });
+        chatHistoryEl.scrollTop = chatHistoryEl.scrollHeight;
+        
+        // Start or reset the fade-out timer on load
+        resetChatFade();
+    } catch (e) {
+        console.error('Error loading chat history from localStorage:', e);
     }
 }
 

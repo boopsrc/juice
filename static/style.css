@@ -1429,4 +1429,119 @@ canvas {
         transform: none;
         align-items: stretch;
     }
+
+    .mobile-chat-toggle {
+        display: flex;
+    }
+
+    .chat-wrapper.chat-hidden {
+        display: none !important;
+    }
 }
+
+/* Chat History Styling */
+.chat-history {
+    width: 100%;
+    max-height: 144px; /* 20% smaller than 180px */
+    overflow-y: auto;
+    background: rgba(8, 10, 16, 0.75);
+    border: 1px solid rgba(0, 240, 255, 0.2);
+    border-radius: 12px;
+    padding: 10px 14px;
+    margin-bottom: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.5);
+    pointer-events: auto; /* Allow scrolling/clicking */
+    transition: opacity 0.5s ease;
+    opacity: 1;
+}
+
+.chat-history.chat-faded {
+    opacity: 0.2;
+}
+
+.chat-history:hover {
+    opacity: 1 !important;
+}
+
+/* Hide chat history if it is empty */
+.chat-history:empty {
+    display: none;
+}
+
+/* Scrollbar styles for chat history */
+.chat-history::-webkit-scrollbar {
+    width: 6px;
+}
+.chat-history::-webkit-scrollbar-track {
+    background: rgba(0,0,0,0.1);
+    border-radius: 3px;
+}
+.chat-history::-webkit-scrollbar-thumb {
+    background: rgba(0, 240, 255, 0.25);
+    border-radius: 3px;
+}
+.chat-history::-webkit-scrollbar-thumb:hover {
+    background: rgba(0, 240, 255, 0.5);
+}
+
+.chat-message {
+    font-size: 0.85rem;
+    line-height: 1.35;
+    word-break: break-word;
+    color: var(--text-primary);
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+}
+
+.chat-message-time {
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+    margin-right: 6px;
+    font-family: monospace;
+}
+
+.chat-message-name {
+    font-weight: 700;
+}
+
+.chat-message-text {
+    color: #f0f3f8;
+}
+
+/* Desktop Hidden state (optional, defaults to visible) */
+.mobile-chat-toggle {
+    display: none;
+    position: absolute;
+    top: 16px;
+    right: 64px; /* Offset to the left of instructions toggle */
+    width: 38px;
+    height: 38px;
+    border: 1px solid rgba(0, 240, 255, 0.35);
+    border-radius: 8px;
+    background: rgba(10, 12, 19, 0.78);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    box-shadow: 0 0 14px rgba(0, 240, 255, 0.12), var(--panel-shadow);
+    z-index: 8;
+    align-items: center;
+    justify-content: center;
+    color: var(--primary-color);
+    font-size: 1.1rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.mobile-chat-toggle:hover {
+    background: rgba(0, 240, 255, 0.15);
+    box-shadow: 0 0 14px rgba(0, 240, 255, 0.35);
+}
+
+.mobile-chat-toggle.chat-muted-indicator {
+    border-color: rgba(255, 51, 85, 0.4);
+    color: #ff3355;
+}
+
