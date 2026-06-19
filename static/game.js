@@ -3250,3 +3250,27 @@ if (savedName) {
     startSetupMicPreview();
     checkAutoJoin();
 }
+
+// Fetch total connected player count from server
+async function fetchGlobalPlayerCount() {
+    try {
+        const res = await fetch('/api/players/count');
+        if (!res.ok) return;
+        const data = await res.json();
+        const count = data.count || 0;
+        
+        const setupEl = document.getElementById('global-player-count-setup');
+        const lobbyEl = document.getElementById('global-player-count-lobby');
+        const gameEl = document.getElementById('global-player-count-game');
+        
+        if (setupEl) setupEl.innerText = count;
+        if (lobbyEl) lobbyEl.innerText = count;
+        if (gameEl) gameEl.innerText = count;
+    } catch (err) {
+        console.warn('[Count Polling] Error fetching player count:', err);
+    }
+}
+
+// Start polling player count every 3 seconds
+setInterval(fetchGlobalPlayerCount, 3000);
+fetchGlobalPlayerCount();

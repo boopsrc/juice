@@ -642,6 +642,29 @@ func main() {
 		}
 	})
 
+	http.HandleFunc("/api/players/count", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		total := 0
+		rm.mu.RLock()
+		for _, room := range rm.rooms {
+			total += room.Hub.playerCount()
+		}
+		rm.mu.RUnlock()
+
+		resp := struct {
+			Count int `json:"count"`
+		}{
+			Count: total,
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	})
+
 	// WebSocket endpoint — requires ?room=ROOM_ID
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		serveWs(rm, w, r)

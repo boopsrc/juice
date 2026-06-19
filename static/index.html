@@ -22,6 +22,11 @@
                 <h1>NEON<span>GRID</span></h1>
                 <p class="subtitle">Mundo 2D Colaborativo</p>
             </div>
+
+            <div class="global-online-badge" style="margin-left: auto; margin-right: auto; display: flex; justify-content: center; width: max-content;">
+                <span class="pulse-indicator"></span>
+                <span><span id="global-player-count-setup">0</span> jogadores online no site</span>
+            </div>
             
             <!-- Secure Context Warning Banner (hidden by default) -->
             <div id="secure-context-warning" class="hidden-warning hidden">
@@ -97,6 +102,11 @@
                 <button id="btn-back-setup" class="btn-text">← Voltar</button>
             </div>
 
+            <div class="global-online-badge" style="margin-top: -10px; margin-bottom: 20px;">
+                <span class="pulse-indicator"></span>
+                <span><span id="global-player-count-lobby">0</span> online no site</span>
+            </div>
+
             <!-- Create Room Section -->
             <div class="create-room-section">
                 <h3>Criar Nova Sala</h3>
@@ -160,6 +170,9 @@
                     </div>
                     <div class="hud-body">
                         <p>Jogadores ativos: <span id="player-count">1</span></p>
+                        <div class="global-online-badge-hud">
+                            🌐 Site: <span id="global-player-count-game">0</span> online
+                        </div>
                         <div id="players-list" class="players-list">
                             <!-- Dynamic list of players -->
                         </div>
