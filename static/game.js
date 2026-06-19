@@ -97,6 +97,7 @@ const players = {}; // stores all player states: { id: { id, name, color, imageU
 const activeDrawings = {}; // drawingId -> { id, points, color, timer, maxTimer, creatorId }
 let isDrawing = false;
 let currentDrawingPoints = [];
+let isCollisionEnabled = true;
 const camera = { x: 0, y: 0 };
 
 const trails = {}; // playerId -> [{ x, y, t }]
@@ -1054,6 +1055,21 @@ btnMusic.addEventListener('click', () => {
         btnMusic.className = 'btn-hud mic-off';
     }
 });
+
+// Drawing Collision Toggle Setup
+const btnCollision = document.getElementById('btn-toggle-collision');
+if (btnCollision) {
+    btnCollision.addEventListener('click', () => {
+        isCollisionEnabled = !isCollisionEnabled;
+        if (isCollisionEnabled) {
+            btnCollision.innerText = 'Colisão do Desenho: Ligada';
+            btnCollision.className = 'btn-hud collision-on';
+        } else {
+            btnCollision.innerText = 'Colisão do Desenho: Desligada';
+            btnCollision.className = 'btn-hud collision-off';
+        }
+    });
+}
 
 // Map Change Button
 const btnChangeMap = document.getElementById('btn-change-map');
@@ -2123,37 +2139,39 @@ function update(dt) {
         }
 
         // Drawings collision check (hard lock/trava for other players only, creator is unaffected)
-        for (const drawingId in activeDrawings) {
-            const drawing = activeDrawings[drawingId];
-            if (drawing.creatorId === localPlayer.id) continue;
-            
-            const points = drawing.points;
-            if (points.length < 2) continue;
-            
-            const r = 20; // Player radius
-            let collides = false;
-            for (let i = 0; i < points.length - 1; i++) {
-                const p0 = points[i];
-                const p1 = points[i + 1];
+        if (isCollisionEnabled) {
+            for (const drawingId in activeDrawings) {
+                const drawing = activeDrawings[drawingId];
+                if (drawing.creatorId === localPlayer.id) continue;
                 
-                const closestNew = getClosestPointOnSegment(targetX, targetY, p0.x, p0.y, p1.x, p1.y);
-                const distNew = Math.hypot(targetX - closestNew.x, targetY - closestNew.y);
+                const points = drawing.points;
+                if (points.length < 2) continue;
                 
-                if (distNew < r) {
-                    const closestPrev = getClosestPointOnSegment(localPlayer.x, localPlayer.y, p0.x, p0.y, p1.x, p1.y);
-                    const distPrev = Math.hypot(localPlayer.x - closestPrev.x, localPlayer.y - closestPrev.y);
+                const r = 20; // Player radius
+                let collides = false;
+                for (let i = 0; i < points.length - 1; i++) {
+                    const p0 = points[i];
+                    const p1 = points[i + 1];
                     
-                    // Only block if moving to targetX/targetY gets closer to the drawing
-                    if (distNew < distPrev) {
-                        collides = true;
-                        break;
+                    const closestNew = getClosestPointOnSegment(targetX, targetY, p0.x, p0.y, p1.x, p1.y);
+                    const distNew = Math.hypot(targetX - closestNew.x, targetY - closestNew.y);
+                    
+                    if (distNew < r) {
+                        const closestPrev = getClosestPointOnSegment(localPlayer.x, localPlayer.y, p0.x, p0.y, p1.x, p1.y);
+                        const distPrev = Math.hypot(localPlayer.x - closestPrev.x, localPlayer.y - closestPrev.y);
+                        
+                        // Only block if moving to targetX/targetY gets closer to the drawing
+                        if (distNew < distPrev) {
+                            collides = true;
+                            break;
+                        }
                     }
                 }
-            }
-            if (collides) {
-                targetX = localPlayer.x;
-                targetY = localPlayer.y;
-                break;
+                if (collides) {
+                    targetX = localPlayer.x;
+                    targetY = localPlayer.y;
+                    break;
+                }
             }
         }
 

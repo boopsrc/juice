@@ -838,6 +838,29 @@ canvas {
     box-shadow: 0 0 15px rgba(57, 255, 20, 0.4);
 }
 
+.btn-hud.collision-on {
+    border-color: rgba(57, 255, 20, 0.6);
+    background: rgba(57, 255, 20, 0.1);
+    color: #39ff14;
+    box-shadow: 0 0 10px rgba(57, 255, 20, 0.2);
+}
+
+.btn-hud.collision-on:hover {
+    background: rgba(57, 255, 20, 0.2);
+    box-shadow: 0 0 15px rgba(57, 255, 20, 0.4);
+}
+
+.btn-hud.collision-off {
+    border-color: rgba(255, 51, 85, 0.4);
+    background: rgba(255, 51, 85, 0.06);
+    color: #ff3355;
+}
+
+.btn-hud.collision-off:hover {
+    background: rgba(255, 51, 85, 0.15);
+    box-shadow: 0 0 10px rgba(255, 51, 85, 0.3);
+}
+
 /* In-game live settings settings-panel */
 .settings-panel {
     width: 100%;
