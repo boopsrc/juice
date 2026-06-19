@@ -603,9 +603,23 @@ function getOrLoadAvatarImage(url) {
 const canvas = document.getElementById('game-canvas');
 const ctx = canvas.getContext('2d');
 
+const MINIMAP_SIZE = 150;
+const minimapContainer = document.getElementById('minimap-container');
+const minimapCanvas = document.getElementById('minimap-canvas');
+const minimapCtx = minimapCanvas ? minimapCanvas.getContext('2d') : null;
+
+const PLAYER_VISIBLE_MARGIN = 40;
+
+// Display settings (persisted via localStorage)
+const displaySettings = {
+    offscreenIndicators: localStorage.getItem('neongrid_offscreen_indicators') !== 'false',
+    minimap: localStorage.getItem('neongrid_minimap') !== 'false'
+};
+
 function resizeCanvas() {
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
+    resizeMinimap();
 }
 window.addEventListener('resize', resizeCanvas);
 resizeCanvas();
@@ -2808,6 +2822,183 @@ function update(dt) {
 }
 
 // Render 2D space
+function resizeMinimap() {
+    if (!minimapCanvas) return;
+    minimapCanvas.width = MINIMAP_SIZE;
+    minimapCanvas.height = MINIMAP_SIZE;
+}
+
+function isPlayerOffScreen(screenX, screenY) {
+    return screenX < PLAYER_VISIBLE_MARGIN ||
+        screenX > canvas.width - PLAYER_VISIBLE_MARGIN ||
+        screenY < PLAYER_VISIBLE_MARGIN ||
+        screenY > canvas.height - PLAYER_VISIBLE_MARGIN;
+}
+
+function getOffscreenEdgePosition(screenX, screenY) {
+    const cx = canvas.width / 2;
+    const cy = canvas.height / 2;
+    const dx = screenX - cx;
+    const dy = screenY - cy;
+
+    if (Math.abs(dx) < 0.001 && Math.abs(dy) < 0.001) {
+        return { x: cx, y: cy, angle: 0 };
+    }
+
+    // Intersect ray from center toward player with the full screen rectangle
+    const halfW = cx;
+    const halfH = cy;
+    const scale = Math.min(halfW / Math.abs(dx), halfH / Math.abs(dy));
+
+    return {
+        x: cx + dx * scale,
+        y: cy + dy * scale,
+        angle: Math.atan2(dy, dx)
+    };
+}
+
+function drawPlayerNamePillAt(ctx, x, y, name, color) {
+    ctx.font = 'bold 12px Outfit';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    const nameWidth = ctx.measureText(name).width;
+    const pillWidth = nameWidth + 16;
+    const pillHeight = 18;
+
+    ctx.fillStyle = 'rgba(10, 12, 19, 0.8)';
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.roundRect(x - pillWidth / 2, y - pillHeight / 2, pillWidth, pillHeight, 9);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(name, x, y);
+}
+
+function drawOffscreenIndicators() {
+    if (!displaySettings.offscreenIndicators) return;
+
+    for (const id in players) {
+        if (id === localPlayer.id) continue;
+
+        const p = players[id];
+        const screenX = p.x - camera.x;
+        const screenY = p.y - camera.y;
+
+        if (!isPlayerOffScreen(screenX, screenY)) continue;
+
+        const edge = getOffscreenEdgePosition(screenX, screenY);
+
+        // Draw arrow with tip exactly at the edge point
+        ctx.save();
+        ctx.translate(edge.x, edge.y);
+        ctx.rotate(edge.angle);
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.moveTo(8, 0);
+        ctx.lineTo(-4, -5);
+        ctx.lineTo(-4, 5);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+
+        // Measure pill dimensions to calculate minimal inset
+        ctx.font = 'bold 12px Outfit';
+        const nameWidth = ctx.measureText(p.name).width;
+        const pillHalfW = (nameWidth + 16) / 2;
+        const pillHalfH = 18 / 2;
+        const inset = Math.max(pillHalfW, pillHalfH) + 2;
+
+        // Offset pill inward along the vector opposite to the edge direction
+        const pillX = edge.x - Math.cos(edge.angle) * inset;
+        const pillY = edge.y - Math.sin(edge.angle) * inset;
+        drawPlayerNamePillAt(ctx, pillX, pillY, p.name, p.color);
+    }
+}
+
+function drawMinimap() {
+    if (!minimapCtx || !minimapContainer || !isJoined) return;
+    if (!displaySettings.minimap) return;
+    if (getComputedStyle(minimapContainer).display === 'none') return;
+
+    const map = MAPS[currentMapIndex];
+    const scale = MINIMAP_SIZE / MAP_SIZE;
+    const radius = MINIMAP_SIZE / 2;
+
+    minimapCtx.clearRect(0, 0, MINIMAP_SIZE, MINIMAP_SIZE);
+
+    minimapCtx.save();
+    minimapCtx.beginPath();
+    minimapCtx.arc(radius, radius, radius, 0, Math.PI * 2);
+    minimapCtx.clip();
+
+    minimapCtx.fillStyle = map.bg;
+    minimapCtx.fillRect(0, 0, MINIMAP_SIZE, MINIMAP_SIZE);
+
+    minimapCtx.strokeStyle = map.grid;
+    minimapCtx.lineWidth = 1;
+    const gridSpacing = 100;
+    for (let x = 0; x <= MAP_SIZE; x += gridSpacing) {
+        const sx = x * scale;
+        minimapCtx.beginPath();
+        minimapCtx.moveTo(sx, 0);
+        minimapCtx.lineTo(sx, MINIMAP_SIZE);
+        minimapCtx.stroke();
+    }
+    for (let y = 0; y <= MAP_SIZE; y += gridSpacing) {
+        const sy = y * scale;
+        minimapCtx.beginPath();
+        minimapCtx.moveTo(0, sy);
+        minimapCtx.lineTo(MINIMAP_SIZE, sy);
+        minimapCtx.stroke();
+    }
+
+    minimapCtx.fillStyle = 'rgba(0, 240, 255, 0.15)';
+    minimapCtx.strokeStyle = 'rgba(0, 240, 255, 0.5)';
+    minimapCtx.lineWidth = 1;
+    minimapCtx.fillRect(
+        camera.x * scale,
+        camera.y * scale,
+        canvas.width * scale,
+        canvas.height * scale
+    );
+    minimapCtx.strokeRect(
+        camera.x * scale,
+        camera.y * scale,
+        canvas.width * scale,
+        canvas.height * scale
+    );
+
+    for (const id in players) {
+        const p = players[id];
+        const px = p.x * scale;
+        const py = p.y * scale;
+        const isLocal = id === localPlayer.id;
+
+        minimapCtx.beginPath();
+        minimapCtx.arc(px, py, isLocal ? 5 : 3.5, 0, Math.PI * 2);
+        minimapCtx.fillStyle = p.color;
+        minimapCtx.fill();
+
+        if (isLocal) {
+            minimapCtx.strokeStyle = '#ffffff';
+            minimapCtx.lineWidth = 1.5;
+            minimapCtx.stroke();
+        }
+    }
+
+    minimapCtx.restore();
+
+    minimapCtx.beginPath();
+    minimapCtx.arc(radius, radius, radius - 1, 0, Math.PI * 2);
+    minimapCtx.strokeStyle = map.border;
+    minimapCtx.lineWidth = 2;
+    minimapCtx.stroke();
+}
+
 function draw() {
     const map = MAPS[currentMapIndex];
 
@@ -3198,6 +3389,9 @@ function draw() {
     }
 
     ctx.restore();
+
+    drawOffscreenIndicators();
+    drawMinimap();
 }
 
 let lastTime = 0;
@@ -3213,6 +3407,82 @@ function gameLoop(timestamp) {
         requestAnimationFrame(gameLoop);
     }
 }
+
+// ============================================================
+// SETTINGS MODAL LOGIC
+// ============================================================
+
+function applyDisplaySettings() {
+    // Sync offscreen indicator toggle checkbox
+    const offscreenToggle = document.getElementById('toggle-offscreen-indicators');
+    if (offscreenToggle) offscreenToggle.checked = displaySettings.offscreenIndicators;
+
+    // Sync minimap toggle checkbox
+    const minimapToggle = document.getElementById('toggle-minimap');
+    if (minimapToggle) minimapToggle.checked = displaySettings.minimap;
+
+    // Apply user-hidden class on minimap container
+    if (minimapContainer) {
+        if (displaySettings.minimap) {
+            minimapContainer.classList.remove('user-hidden');
+        } else {
+            minimapContainer.classList.add('user-hidden');
+        }
+    }
+}
+
+function saveDisplaySetting(key, value) {
+    displaySettings[key] = value;
+    localStorage.setItem(
+        key === 'offscreenIndicators' ? 'neongrid_offscreen_indicators' : 'neongrid_minimap',
+        String(value)
+    );
+    applyDisplaySettings();
+}
+
+function openSettingsModal() {
+    const modal = document.getElementById('settings-modal');
+    if (modal) {
+        applyDisplaySettings();
+        modal.classList.remove('hidden');
+    }
+}
+
+function closeSettingsModal() {
+    const modal = document.getElementById('settings-modal');
+    if (modal) modal.classList.add('hidden');
+}
+
+// Settings modal event listeners
+const btnOpenSettings = document.getElementById('btn-open-settings');
+if (btnOpenSettings) btnOpenSettings.addEventListener('click', openSettingsModal);
+
+const btnSettingsClose = document.getElementById('btn-settings-close');
+if (btnSettingsClose) btnSettingsClose.addEventListener('click', closeSettingsModal);
+
+const settingsModal = document.getElementById('settings-modal');
+if (settingsModal) {
+    settingsModal.addEventListener('click', (e) => {
+        if (e.target === settingsModal) closeSettingsModal();
+    });
+}
+
+const toggleOffscreen = document.getElementById('toggle-offscreen-indicators');
+if (toggleOffscreen) {
+    toggleOffscreen.addEventListener('change', (e) => {
+        saveDisplaySetting('offscreenIndicators', e.target.checked);
+    });
+}
+
+const toggleMinimap = document.getElementById('toggle-minimap');
+if (toggleMinimap) {
+    toggleMinimap.addEventListener('change', (e) => {
+        saveDisplaySetting('minimap', e.target.checked);
+    });
+}
+
+// Apply display settings on load
+applyDisplaySettings();
 
 // Bootstrap
 loadCachedProfile();

@@ -159,6 +159,10 @@
         <!-- Render Game Canvas -->
         <canvas id="game-canvas"></canvas>
 
+        <div id="minimap-container" class="minimap-container" aria-label="Minimapa">
+            <canvas id="minimap-canvas"></canvas>
+        </div>
+
         <!-- Dynamic Game HUD overlay -->
         <div class="game-hud">
             <!-- Left Side Column -->
@@ -202,36 +206,8 @@
                     </div>
                 </div>
 
-                <div class="hud-panel settings-panel">
-                    <h3>Configurações</h3>
-                    <div class="form-group-compact">
-                        <label for="hud-image-url">Atualizar URL da Imagem</label>
-                        <div class="input-with-btn">
-                            <input type="url" id="hud-image-url" placeholder="https://exemplo.com/foto.png" autocomplete="off">
-                            <button id="btn-update-image">Ok</button>
-                        </div>
-                    </div>
-                    <div class="form-group-compact" style="margin-top: 10px;">
-                        <label for="hud-mic-select">Microfone</label>
-                        <select id="hud-mic-select" class="select-hud">
-                            <option value="default">Dispositivo Padrão</option>
-                        </select>
-                    </div>
-                    <div style="margin-top: 12px;">
-                        <button id="btn-toggle-music" class="btn-hud music-on">Música: Ligada</button>
-                    </div>
-                    <div style="margin-top: 8px;">
-                        <button id="btn-toggle-collision" class="btn-hud collision-on">Colisão do Desenho: Ligada</button>
-                    </div>
-                    <div style="margin-top: 8px;">
-                        <button id="btn-copy-invite" class="btn-hud invite-btn">📋 Copiar Link de Convite</button>
-                    </div>
-                    <div style="margin-top: 8px;">
-                        <button id="btn-change-map" class="btn-hud invite-btn" style="border-color: #ff007f; color: #ff007f;">🗺️ Mudar Mapa</button>
-                    </div>
-                    <div style="margin-top: 8px;">
-                        <button id="btn-leave-room" class="btn-hud mic-off">Sair da Sala</button>
-                    </div>
+                <div class="hud-panel settings-trigger-panel">
+                    <button id="btn-open-settings" class="btn-hud invite-btn">⚙ Configurações</button>
                 </div>
 
                 <div id="controls-helper" class="hud-panel controls-helper">
@@ -253,6 +229,69 @@
             </div>
             <div id="chat-trigger-info" class="chat-trigger-info">
                 Pressione <span>Enter</span> para conversar
+            </div>
+        </div>
+
+        <!-- Settings Modal -->
+        <div id="settings-modal" class="modal-overlay settings-modal-overlay hidden">
+            <div class="modal-card settings-modal-card">
+                <h3>⚙ Configurações</h3>
+
+                <div class="settings-modal-section">
+                    <h4>Avatar</h4>
+                    <div class="form-group-compact">
+                        <label for="hud-image-url">URL da Imagem do Avatar</label>
+                        <div class="input-with-btn">
+                            <input type="url" id="hud-image-url" placeholder="https://exemplo.com/foto.png" autocomplete="off">
+                            <button id="btn-update-image">Ok</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="settings-modal-section">
+                    <h4>Microfone</h4>
+                    <div class="form-group-compact">
+                        <label for="hud-mic-select">Dispositivo</label>
+                        <select id="hud-mic-select" class="select-hud">
+                            <option value="default">Dispositivo Padrão</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="settings-modal-section">
+                    <h4>Áudio / Gameplay</h4>
+                    <button id="btn-toggle-music" class="btn-hud music-on">Música: Ligada</button>
+                    <button id="btn-toggle-collision" class="btn-hud collision-on" style="margin-top: 8px;">Colisão do Desenho: Ligada</button>
+                </div>
+
+                <div class="settings-modal-section">
+                    <h4>Exibição</h4>
+                    <div class="settings-toggle-row">
+                        <span>Indicadores Off-screen</span>
+                        <label class="toggle-label">
+                            <input type="checkbox" id="toggle-offscreen-indicators" checked>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                    <div class="settings-toggle-row">
+                        <span>Minimapa</span>
+                        <label class="toggle-label">
+                            <input type="checkbox" id="toggle-minimap" checked>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="settings-modal-section">
+                    <h4>Sala</h4>
+                    <button id="btn-copy-invite" class="btn-hud invite-btn">📋 Copiar Link de Convite</button>
+                    <button id="btn-change-map" class="btn-hud invite-btn" style="margin-top: 8px; border-color: #ff007f; color: #ff007f;">🗺️ Mudar Mapa</button>
+                    <button id="btn-leave-room" class="btn-hud mic-off" style="margin-top: 8px;">Sair da Sala</button>
+                </div>
+
+                <div class="modal-actions" style="margin-top: 16px;">
+                    <button id="btn-settings-close" class="btn-glow-sm">Fechar</button>
+                </div>
             </div>
         </div>
 
