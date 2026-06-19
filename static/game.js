@@ -110,8 +110,12 @@ const activeShots = [];
 const particles = [];
 let mouseMapX = MAP_SIZE / 2;
 let mouseMapY = MAP_SIZE / 2;
+let mouseScreenX = 0;
+let mouseScreenY = 0;
 const SHOOT_COOLDOWN_TIME = 3.0; // 3 seconds cooldown
 let shootCooldownTimer = 0.0;
+const TELEPORT_COOLDOWN_TIME = 4.0; // 4 seconds cooldown
+let teleportCooldownTimer = 0.0;
 let localFacingDir = { x: 1, y: 0 }; // default facing right
 let selectedAudioDeviceId = localStorage.getItem('neongrid_selected_mic') || 'default';
 let setupMicStream = null;
@@ -602,6 +606,7 @@ function getOrLoadAvatarImage(url) {
 // Canvas elements
 const canvas = document.getElementById('game-canvas');
 const ctx = canvas.getContext('2d');
+canvas.style.cursor = 'none'; // Hide default cursor, we draw a custom one
 
 const MINIMAP_SIZE = 150;
 const minimapContainer = document.getElementById('minimap-container');
@@ -1906,9 +1911,12 @@ function fireShot() {
     shootCooldownTimer = SHOOT_COOLDOWN_TIME;
     playAttackSound();
     
-    // Fire in the direction the player is currently heading (localFacingDir)
-    const dirX = localFacingDir.x;
-    const dirY = localFacingDir.y;
+    // Fire toward the mouse cursor position
+    const aimDx = mouseMapX - localPlayer.x;
+    const aimDy = mouseMapY - localPlayer.y;
+    const aimLen = Math.hypot(aimDx, aimDy) || 1;
+    const dirX = aimDx / aimLen;
+    const dirY = aimDy / aimLen;
     
     const shotSpeed = 950; // pixels per second
     const vx = dirX * shotSpeed;
@@ -1939,6 +1947,53 @@ function fireShot() {
     localPlayer.kbY = -dirY * 300;
 }
 
+// Audio setup for teleport
+const poofSound = new Audio('poof-in-cloud.mp3');
+poofSound.volume = 0.6;
+
+function playTeleportSound() {
+    poofSound.currentTime = 0;
+    poofSound.play().catch(e => console.log('Audio play failed', e));
+}
+
+function performTeleport() {
+    if (teleportCooldownTimer > 0) return;
+    
+    teleportCooldownTimer = TELEPORT_COOLDOWN_TIME;
+    playTeleportSound();
+    
+    // Teleport 300px toward mouse position
+    const aimDx = mouseMapX - localPlayer.x;
+    const aimDy = mouseMapY - localPlayer.y;
+    const aimLen = Math.hypot(aimDx, aimDy) || 1;
+    const dirX = aimDx / aimLen;
+    const dirY = aimDy / aimLen;
+    
+    localPlayer.x += dirX * 300;
+    localPlayer.y += dirY * 300;
+    
+    // Constrain to map bounds
+    localPlayer.x = Math.max(0, Math.min(localPlayer.x, MAP_SIZE));
+    localPlayer.y = Math.max(0, Math.min(localPlayer.y, MAP_SIZE));
+    
+    if (players[localPlayer.id]) {
+        players[localPlayer.id].x = localPlayer.x;
+        players[localPlayer.id].y = localPlayer.y;
+    }
+    
+    // Send immediate position update
+    if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({
+            type: 'move',
+            payload: {
+                id: localPlayer.id,
+                x: localPlayer.x,
+                y: localPlayer.y
+            }
+        }));
+    }
+}
+
 // Keyboard Input Handlers
 window.addEventListener('keydown', (e) => {
     if (isChatting) {
@@ -1956,25 +2011,58 @@ window.addEventListener('keydown', (e) => {
         }
     }
 
+    if (e.key === '2') {
+        if (isJoined && document.activeElement.tagName !== 'INPUT' && teleportCooldownTimer <= 0) {
+            performTeleport();
+            e.preventDefault();
+            return;
+        }
+    }
+
     if (e.key === 'Enter') {
         openChat();
         e.preventDefault();
         return;
     }
 
-    if (e.key in keys) {
-        keys[e.key] = true;
-    }
-    if (['w', 'a', 's', 'd', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
-        keys[e.key] = true;
+    const keyNorm = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+    if (keyNorm in keys) {
+        keys[keyNorm] = true;
     }
 });
 
 window.addEventListener('keyup', (e) => {
-    if (['w', 'a', 's', 'd', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
-        keys[e.key] = false;
+    const keyNorm = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+    if (keyNorm in keys) {
+        keys[keyNorm] = false;
     }
 });
+
+// Mobile Ability Buttons
+const btnAbility1 = document.getElementById('btn-ability-1');
+const btnAbility2 = document.getElementById('btn-ability-2');
+
+if (btnAbility1) {
+    const triggerAbility1 = (e) => {
+        e.preventDefault();
+        if (isJoined && shootCooldownTimer <= 0) {
+            fireShot();
+        }
+    };
+    btnAbility1.addEventListener('touchstart', triggerAbility1);
+    btnAbility1.addEventListener('mousedown', triggerAbility1);
+}
+
+if (btnAbility2) {
+    const triggerAbility2 = (e) => {
+        e.preventDefault();
+        if (isJoined && teleportCooldownTimer <= 0) {
+            performTeleport();
+        }
+    };
+    btnAbility2.addEventListener('touchstart', triggerAbility2);
+    btnAbility2.addEventListener('mousedown', triggerAbility2);
+}
 
 function resetMobileJoystick() {
     mobileMove.x = 0;
@@ -2075,6 +2163,9 @@ canvas.addEventListener('pointerdown', (e) => {
 });
 
 canvas.addEventListener('pointermove', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    mouseScreenX = e.clientX - rect.left;
+    mouseScreenY = e.clientY - rect.top;
     const coords = getMapCoordsFromEvent(e);
     mouseMapX = coords.x;
     mouseMapY = coords.y;
@@ -2486,10 +2577,10 @@ function update(dt) {
     let moveX = mobileMove.x;
     let moveY = mobileMove.y;
 
-    if (keys['w'] || keys['ArrowUp'] || keys['W']) moveY -= 1;
-    if (keys['s'] || keys['ArrowDown'] || keys['S']) moveY += 1;
-    if (keys['a'] || keys['ArrowLeft'] || keys['A']) moveX -= 1;
-    if (keys['d'] || keys['ArrowRight'] || keys['D']) moveX += 1;
+    if (keys['w'] || keys['ArrowUp']) moveY -= 1;
+    if (keys['s'] || keys['ArrowDown']) moveY += 1;
+    if (keys['a'] || keys['ArrowLeft']) moveX -= 1;
+    if (keys['d'] || keys['ArrowRight']) moveX += 1;
 
     const localIsMoving = moveX !== 0 || moveY !== 0;
 
@@ -2555,7 +2646,6 @@ function update(dt) {
         if (isCollisionEnabled) {
             for (const drawingId in activeDrawings) {
                 const drawing = activeDrawings[drawingId];
-                if (drawing.creatorId === localPlayer.id) continue;
                 
                 const points = drawing.points;
                 if (points.length < 2) continue;
@@ -2797,27 +2887,53 @@ function update(dt) {
     }
 
     // 6. Update shooting cooldown timer and HUD visual state
+    const slot1 = document.getElementById('weapon-slot-1');
+    const overlay1 = document.getElementById('cooldown-overlay-1');
+    const timer1 = document.getElementById('cooldown-timer-1');
+    const mobileBtn1 = document.getElementById('btn-ability-1');
+
     if (shootCooldownTimer > 0) {
         shootCooldownTimer -= dt;
         if (shootCooldownTimer < 0) shootCooldownTimer = 0;
 
-        const slot = document.getElementById('weapon-slot-1');
-        const overlay = document.getElementById('cooldown-overlay-1');
-        const timer = document.getElementById('cooldown-timer-1');
-        if (slot && overlay && timer) {
-            slot.classList.add('cooldown');
-            overlay.style.width = `${(shootCooldownTimer / SHOOT_COOLDOWN_TIME) * 100}%`;
-            timer.innerText = `${shootCooldownTimer.toFixed(1)}s`;
+        if (slot1 && overlay1 && timer1) {
+            slot1.classList.add('cooldown');
+            overlay1.style.width = `${(shootCooldownTimer / SHOOT_COOLDOWN_TIME) * 100}%`;
+            timer1.innerText = `${shootCooldownTimer.toFixed(1)}s`;
         }
+        if (mobileBtn1) mobileBtn1.classList.add('cooldown');
     } else {
-        const slot = document.getElementById('weapon-slot-1');
-        const overlay = document.getElementById('cooldown-overlay-1');
-        const timer = document.getElementById('cooldown-timer-1');
-        if (slot && overlay && timer) {
-            slot.classList.remove('cooldown');
-            overlay.style.width = '0%';
-            timer.innerText = 'Pronto';
+        if (slot1 && overlay1 && timer1) {
+            slot1.classList.remove('cooldown');
+            overlay1.style.width = '0%';
+            timer1.innerText = 'Pronto';
         }
+        if (mobileBtn1) mobileBtn1.classList.remove('cooldown');
+    }
+
+    // 7. Update teleport cooldown timer and HUD visual state
+    const slot2 = document.getElementById('weapon-slot-2');
+    const overlay2 = document.getElementById('cooldown-overlay-2');
+    const timer2 = document.getElementById('cooldown-timer-2');
+    const mobileBtn2 = document.getElementById('btn-ability-2');
+
+    if (teleportCooldownTimer > 0) {
+        teleportCooldownTimer -= dt;
+        if (teleportCooldownTimer < 0) teleportCooldownTimer = 0;
+
+        if (slot2 && overlay2 && timer2) {
+            slot2.classList.add('cooldown');
+            overlay2.style.width = `${(teleportCooldownTimer / TELEPORT_COOLDOWN_TIME) * 100}%`;
+            timer2.innerText = `${teleportCooldownTimer.toFixed(1)}s`;
+        }
+        if (mobileBtn2) mobileBtn2.classList.add('cooldown');
+    } else {
+        if (slot2 && overlay2 && timer2) {
+            slot2.classList.remove('cooldown');
+            overlay2.style.width = '0%';
+            timer2.innerText = 'Pronto';
+        }
+        if (mobileBtn2) mobileBtn2.classList.remove('cooldown');
     }
 }
 
@@ -3016,6 +3132,15 @@ function draw() {
     // Constrain camera view to map boundaries
     camera.x = Math.max(0, Math.min(camera.x, MAP_SIZE - canvas.width));
     camera.y = Math.max(0, Math.min(camera.y, MAP_SIZE - canvas.height));
+
+    // Continually update mouseMap based on the changing camera
+    const rect = canvas.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0) {
+        const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
+        mouseMapX = mouseScreenX * scaleX + camera.x;
+        mouseMapY = mouseScreenY * scaleY + camera.y;
+    }
 
     ctx.save();
     // Offset standard drawings by camera coordinates
@@ -3392,6 +3517,39 @@ function draw() {
 
     drawOffscreenIndicators();
     drawMinimap();
+
+    // Draw custom pulsing cursor
+    if (mouseScreenX > 0 || mouseScreenY > 0) {
+        const cursorTime = performance.now() * 0.004;
+        const pulse = Math.sin(cursorTime) * 0.5 + 0.5; // 0..1
+        const baseRadius = 6;
+        const cursorRadius = baseRadius + pulse * 3;
+        const cursorColor = localPlayer.color;
+
+        // Outer glow
+        ctx.save();
+        ctx.shadowColor = cursorColor;
+        ctx.shadowBlur = 12 + pulse * 8;
+        ctx.fillStyle = hexToRgba(cursorColor, 0.25 + pulse * 0.15);
+        ctx.beginPath();
+        ctx.arc(mouseScreenX, mouseScreenY, cursorRadius + 4, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Core circle
+        ctx.shadowBlur = 6;
+        ctx.fillStyle = hexToRgba(cursorColor, 0.7 + pulse * 0.3);
+        ctx.beginPath();
+        ctx.arc(mouseScreenX, mouseScreenY, cursorRadius, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Bright center dot
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = hexToRgba('#ffffff', 0.8 + pulse * 0.2);
+        ctx.beginPath();
+        ctx.arc(mouseScreenX, mouseScreenY, 2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+    }
 }
 
 let lastTime = 0;
