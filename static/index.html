@@ -182,6 +182,20 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- Diagnostics HUD Panel -->
+                <div class="hud-panel diagnostics-panel" style="margin-top: 10px; font-size: 0.8rem; display: flex; flex-direction: column; gap: 6px; width: 250px;">
+                    <div class="hud-header" style="border-bottom: 1px solid rgba(255,255,255,0.06); padding-bottom: 4px; margin-bottom: 2px;">
+                        <span class="logo-icon-sm" style="color: #00f0ff; font-size: 1rem; text-shadow: 0 0 8px rgba(0,240,255,0.4);">❖</span>
+                        <h3 style="font-size: 0.85rem; font-weight: 600;">Diagnóstico</h3>
+                    </div>
+                    <div style="display: flex; flex-direction: column; gap: 4px; color: var(--text-secondary);">
+                        <div style="display: flex; justify-content: space-between;"><span>FPS:</span><span id="diag-fps" style="color: #fff; font-weight: 600;">--</span></div>
+                        <div style="display: flex; justify-content: space-between;"><span>Ping:</span><span id="diag-ping" style="color: #fff; font-weight: 600;">-- ms</span></div>
+                        <div style="display: flex; justify-content: space-between;"><span>WebRTC Voz:</span><span id="diag-webrtc" style="color: #fff; font-weight: 600;">0 cxs</span></div>
+                        <div style="display: flex; justify-content: space-between;"><span>Estado WS:</span><span id="diag-ws" style="color: #fff; font-weight: 600;">Desconectado</span></div>
+                    </div>
+                </div>
             </div>
 
             <!-- Right Side Column -->

@@ -182,7 +182,7 @@ func (h *Hub) run() {
 						Payload: json.RawMessage(leavePayloadJSON),
 					}
 					leaveMsgBytes, _ := json.Marshal(leaveMsg)
-					h.broadcastToAll(leaveMsgBytes)
+					h.broadcastToAll(leaveMsgBytes, true)
 				}
 
 				// If room is now empty, schedule cleanup
@@ -221,7 +221,7 @@ func (h *Hub) run() {
 				msg.Payload = json.RawMessage(newPayloadBytes)
 				newMsgBytes, _ := json.Marshal(msg)
 
-				h.broadcastToAll(newMsgBytes)
+				h.broadcastToAll(newMsgBytes, true)
 
 			case "move":
 				var payload MovePayload
@@ -242,7 +242,7 @@ func (h *Hub) run() {
 				msg.Payload = json.RawMessage(newPayloadBytes)
 				newMsgBytes, _ := json.Marshal(msg)
 
-				h.broadcastToAll(newMsgBytes)
+				h.broadcastToAll(newMsgBytes, false)
 
 			case "chat":
 				var payload ChatPayload
@@ -256,7 +256,7 @@ func (h *Hub) run() {
 				msg.Payload = json.RawMessage(newPayloadBytes)
 				newMsgBytes, _ := json.Marshal(msg)
 
-				h.broadcastToAll(newMsgBytes)
+				h.broadcastToAll(newMsgBytes, true)
 
 			case "signal":
 				var payload SignalPayload
@@ -293,7 +293,7 @@ func (h *Hub) run() {
 					h.room.manager.mu.Unlock()
 				}
 
-				h.broadcastToAll(cm.message) // Broadcast unchanged to everyone
+				h.broadcastToAll(cm.message, true) // Broadcast unchanged to everyone
 
 			case "ping":
 				// Echo directly back to the sender
@@ -329,7 +329,7 @@ func (h *Hub) run() {
 				msg.Payload = json.RawMessage(newPayloadBytes)
 				newMsgBytes, _ := json.Marshal(msg)
 
-				h.broadcastToAll(newMsgBytes)
+				h.broadcastToAll(newMsgBytes, false)
 
 			case "update_hp":
 				var payload struct {
@@ -344,21 +344,24 @@ func (h *Hub) run() {
 					newPayloadBytes, _ := json.Marshal(payload)
 					msg.Payload = json.RawMessage(newPayloadBytes)
 					newMsgBytes, _ := json.Marshal(msg)
-					h.broadcastToAll(newMsgBytes)
+					h.broadcastToAll(newMsgBytes, true)
 				}
 
 			case "new_drawing", "shoot", "death":
-				h.broadcastToAll(cm.message)
+				h.broadcastToAll(cm.message, true)
 			}
 		}
 	}
 }
 
-func (h *Hub) broadcastToAll(message []byte) {
+func (h *Hub) broadcastToAll(message []byte, priority bool) {
 	for client := range h.clients {
 		select {
 		case client.send <- message:
 		default:
+			if !priority {
+				continue
+			}
 			client.conn.Close()
 		}
 	}

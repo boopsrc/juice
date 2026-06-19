@@ -727,6 +727,12 @@ function connectWebSocket(roomId, password) {
     currentRoomId = roomId;
     currentRoomPassword = password || '';
 
+    const diagWs = document.getElementById('diag-ws');
+    if (diagWs) {
+        diagWs.innerText = 'Conectando...';
+        diagWs.style.color = '#ffea00';
+    }
+
     const protocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
     let wsUrl = protocol + window.location.host + '/ws?room=' + encodeURIComponent(roomId);
     if (password) {
@@ -736,6 +742,10 @@ function connectWebSocket(roomId, password) {
 
     socket.onopen = () => {
         console.log('[Socket] Connection established.');
+        if (diagWs) {
+            diagWs.innerText = 'Conectado';
+            diagWs.style.color = '#39ff14';
+        }
         
         // Start ping interval
         if (pingInterval) clearInterval(pingInterval);
@@ -752,6 +762,10 @@ function connectWebSocket(roomId, password) {
     socket.onclose = () => {
         console.warn('[Socket] Connection lost. Reconnecting in 3 seconds...');
         isJoined = false;
+        if (diagWs) {
+            diagWs.innerText = 'Desconectado';
+            diagWs.style.color = '#ff3333';
+        }
         
         if (pingInterval) {
             clearInterval(pingInterval);
@@ -988,6 +1002,15 @@ function connectWebSocket(roomId, password) {
                     if (players[localPlayer.id]) {
                         players[localPlayer.id].ping = pingTime;
                     }
+                    
+                    const diagPing = document.getElementById('diag-ping');
+                    if (diagPing) {
+                        diagPing.innerText = `${pingTime} ms`;
+                        if (pingTime < 80) diagPing.style.color = '#39ff14';
+                        else if (pingTime < 180) diagPing.style.color = '#ffea00';
+                        else diagPing.style.color = '#ff3333';
+                    }
+
                     if (socket && socket.readyState === WebSocket.OPEN) {
                         socket.send(JSON.stringify({
                             type: 'update_ping',
@@ -2656,84 +2679,93 @@ function update(dt) {
         const totalVx = dx + (localPlayer.kbX || 0);
         const totalVy = dy + (localPlayer.kbY || 0);
 
-        let targetX = localPlayer.x + totalVx * dt;
-        let targetY = localPlayer.y + totalVy * dt;
+        const MAX_PHYSICS_STEP = 0.016; // Max 16ms per step
+        let remainingDt = dt;
+        
+        while (remainingDt > 0) {
+            const stepDt = Math.min(remainingDt, MAX_PHYSICS_STEP);
+            remainingDt -= stepDt;
 
-        // Constraint check (map boundaries)
-        targetX = Math.max(20, Math.min(targetX, MAP_SIZE - 20));
-        targetY = Math.max(20, Math.min(targetY, MAP_SIZE - 20));
+            let targetX = localPlayer.x + totalVx * stepDt;
+            let targetY = localPlayer.y + totalVy * stepDt;
 
-        // Obstacles collision check
-        const map = MAPS[currentMapIndex];
-        if (map.obstacles) {
-            for (const obs of map.obstacles) {
-                const r = 20; // player radius
-                // AABB Collision test
-                if (targetX + r > obs.x && targetX - r < obs.x + obs.w &&
-                    targetY + r > obs.y && targetY - r < obs.y + obs.h) {
-                    
-                    // Simple resolution: check which axis caused the overlap
-                    const collisionX = (localPlayer.x + r > obs.x && localPlayer.x - r < obs.x + obs.w);
-                    const collisionY = (localPlayer.y + r > obs.y && localPlayer.y - r < obs.y + obs.h);
-                    
-                    if (!collisionY) {
-                        targetY = localPlayer.y;
-                        localPlayer.kbY = 0;
-                    }
-                    else if (!collisionX) {
-                        targetX = localPlayer.x;
-                        localPlayer.kbX = 0;
-                    }
-                    else {
-                        targetX = localPlayer.x;
-                        targetY = localPlayer.y;
-                        localPlayer.kbX = 0;
-                        localPlayer.kbY = 0;
-                    }
-                }
-            }
-        }
+            // Constraint check (map boundaries)
+            targetX = Math.max(20, Math.min(targetX, MAP_SIZE - 20));
+            targetY = Math.max(20, Math.min(targetY, MAP_SIZE - 20));
 
-        // Drawings collision check (hard lock/trava for other players only, creator is unaffected)
-        if (isCollisionEnabled) {
-            for (const drawingId in activeDrawings) {
-                const drawing = activeDrawings[drawingId];
-                
-                const points = drawing.points;
-                if (points.length < 2) continue;
-                
-                const r = 20; // Player radius
-                let collides = false;
-                for (let i = 0; i < points.length - 1; i++) {
-                    const p0 = points[i];
-                    const p1 = points[i + 1];
-                    
-                    const closestNew = getClosestPointOnSegment(targetX, targetY, p0.x, p0.y, p1.x, p1.y);
-                    const distNew = Math.hypot(targetX - closestNew.x, targetY - closestNew.y);
-                    
-                    if (distNew < r) {
-                        const closestPrev = getClosestPointOnSegment(localPlayer.x, localPlayer.y, p0.x, p0.y, p1.x, p1.y);
-                        const distPrev = Math.hypot(localPlayer.x - closestPrev.x, localPlayer.y - closestPrev.y);
+            // Obstacles collision check
+            const map = MAPS[currentMapIndex];
+            if (map.obstacles) {
+                for (const obs of map.obstacles) {
+                    const r = 20; // player radius
+                    // AABB Collision test
+                    if (targetX + r > obs.x && targetX - r < obs.x + obs.w &&
+                        targetY + r > obs.y && targetY - r < obs.y + obs.h) {
                         
-                        // Only block if moving to targetX/targetY gets closer to the drawing
-                        if (distNew < distPrev) {
-                            collides = true;
-                            break;
+                        // Simple resolution: check which axis caused the overlap
+                        const collisionX = (localPlayer.x + r > obs.x && localPlayer.x - r < obs.x + obs.w);
+                        const collisionY = (localPlayer.y + r > obs.y && localPlayer.y - r < obs.y + obs.h);
+                        
+                        if (!collisionY) {
+                            targetY = localPlayer.y;
+                            localPlayer.kbY = 0;
+                        }
+                        else if (!collisionX) {
+                            targetX = localPlayer.x;
+                            localPlayer.kbX = 0;
+                        }
+                        else {
+                            targetX = localPlayer.x;
+                            targetY = localPlayer.y;
+                            localPlayer.kbX = 0;
+                            localPlayer.kbY = 0;
                         }
                     }
                 }
-                if (collides) {
-                    targetX = localPlayer.x;
-                    targetY = localPlayer.y;
-                    localPlayer.kbX = 0;
-                    localPlayer.kbY = 0;
-                    break;
+            }
+
+            // Drawings collision check (hard lock/trava for other players only, creator is unaffected)
+            if (isCollisionEnabled) {
+                for (const drawingId in activeDrawings) {
+                    const drawing = activeDrawings[drawingId];
+                    
+                    const points = drawing.points;
+                    if (points.length < 2) continue;
+                    if (drawing.creatorId === localPlayer.id) continue;
+                    
+                    const r = 20; // Player radius
+                    let collides = false;
+                    for (let i = 0; i < points.length - 1; i++) {
+                        const p0 = points[i];
+                        const p1 = points[i + 1];
+                        
+                        const closestNew = getClosestPointOnSegment(targetX, targetY, p0.x, p0.y, p1.x, p1.y);
+                        const distNew = Math.hypot(targetX - closestNew.x, targetY - closestNew.y);
+                        
+                        if (distNew < r) {
+                            const closestPrev = getClosestPointOnSegment(localPlayer.x, localPlayer.y, p0.x, p0.y, p1.x, p1.y);
+                            const distPrev = Math.hypot(localPlayer.x - closestPrev.x, localPlayer.y - closestPrev.y);
+                            
+                            // Only block if moving to targetX/targetY gets closer to the drawing
+                            if (distNew < distPrev) {
+                                collides = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (collides) {
+                        targetX = localPlayer.x;
+                        targetY = localPlayer.y;
+                        localPlayer.kbX = 0;
+                        localPlayer.kbY = 0;
+                        break;
+                    }
                 }
             }
-        }
 
-        localPlayer.x = targetX;
-        localPlayer.y = targetY;
+            localPlayer.x = targetX;
+            localPlayer.y = targetY;
+        }
 
         // Update self in the global players storage
         if (players[localPlayer.id]) {
@@ -2936,6 +2968,7 @@ function update(dt) {
                     // Start death animation locally
                     hitPlayer.isDead = true;
                     hitPlayer.deathTimer = DEATH_ANIM_DURATION;
+                    playDeathSound();
                     
                     // Broadcast death to all clients
                     if (socket && socket.readyState === WebSocket.OPEN) {
@@ -3741,10 +3774,37 @@ function draw() {
 }
 
 let lastTime = 0;
+let fpsFrameCount = 0;
+let fpsLastTime = 0;
+
 function gameLoop(timestamp) {
     if (!lastTime) lastTime = timestamp;
     const dt = (timestamp - lastTime) / 1000;
     lastTime = timestamp;
+
+    fpsFrameCount++;
+    if (!fpsLastTime) fpsLastTime = timestamp;
+    if (timestamp - fpsLastTime >= 1000) {
+        const fpsVal = Math.round((fpsFrameCount * 1000) / (timestamp - fpsLastTime));
+        const diagFps = document.getElementById('diag-fps');
+        if (diagFps) {
+            diagFps.innerText = fpsVal;
+            if (fpsVal >= 50) diagFps.style.color = '#39ff14';
+            else if (fpsVal >= 30) diagFps.style.color = '#ffea00';
+            else diagFps.style.color = '#ff3333';
+        }
+        
+        const diagWebRTC = document.getElementById('diag-webrtc');
+        if (diagWebRTC) {
+            const peerCount = Object.keys(peerConnections).length;
+            diagWebRTC.innerText = `${peerCount} cx${peerCount !== 1 ? 's' : ''}`;
+            if (peerCount > 15) diagWebRTC.style.color = '#ffea00';
+            else diagWebRTC.style.color = '#fff';
+        }
+
+        fpsFrameCount = 0;
+        fpsLastTime = timestamp;
+    }
 
     update(dt);
     draw();
