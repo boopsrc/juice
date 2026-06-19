@@ -99,6 +99,10 @@ let isDrawing = false;
 let currentDrawingPoints = [];
 let isCollisionEnabled = true;
 let selectedAudioDeviceId = localStorage.getItem('neongrid_selected_mic') || 'default';
+let setupMicStream = null;
+let setupAudioAnalyser = null;
+let setupAudioDataArray = null;
+let setupAudioSource = null;
 const camera = { x: 0, y: 0 };
 
 // Load cached profile on start
@@ -138,6 +142,71 @@ function loadCachedProfile() {
             customColorWrapper.classList.remove('active');
         }
     }
+}
+
+async function startSetupMicPreview() {
+    stopSetupMicPreview();
+    try {
+        const constraints = {
+            audio: selectedAudioDeviceId && selectedAudioDeviceId !== 'default' ? { deviceId: { exact: selectedAudioDeviceId } } : true
+        };
+        setupMicStream = await navigator.mediaDevices.getUserMedia(constraints);
+        initAudioContext();
+        
+        setupAudioSource = audioContext.createMediaStreamSource(setupMicStream);
+        setupAudioAnalyser = audioContext.createAnalyser();
+        setupAudioAnalyser.fftSize = 256;
+        setupAudioSource.connect(setupAudioAnalyser);
+        
+        const bufferLength = setupAudioAnalyser.frequencyBinCount;
+        setupAudioDataArray = new Uint8Array(bufferLength);
+        
+        requestAnimationFrame(updateSetupMicVolumeMeter);
+        console.log('[Setup Mic] local preview stream started.');
+    } catch (err) {
+        console.warn('[Setup Mic] Failed to start local microphone preview:', err);
+    }
+}
+
+function stopSetupMicPreview() {
+    if (setupMicStream) {
+        setupMicStream.getTracks().forEach(track => track.stop());
+        setupMicStream = null;
+        console.log('[Setup Mic] local preview stream stopped.');
+    }
+    if (setupAudioSource) {
+        try {
+            setupAudioSource.disconnect();
+        } catch (e) {}
+        setupAudioSource = null;
+    }
+    setupAudioAnalyser = null;
+    setupAudioDataArray = null;
+    const meterFill = document.getElementById('setup-mic-meter-fill');
+    if (meterFill) meterFill.style.width = '0%';
+}
+
+function updateSetupMicVolumeMeter() {
+    if (!setupMicStream || !setupAudioAnalyser) {
+        const meterFill = document.getElementById('setup-mic-meter-fill');
+        if (meterFill) meterFill.style.width = '0%';
+        return;
+    }
+    
+    setupAudioAnalyser.getByteFrequencyData(setupAudioDataArray);
+    let sum = 0;
+    for (let i = 0; i < setupAudioDataArray.length; i++) {
+        sum += setupAudioDataArray[i];
+    }
+    const average = sum / setupAudioDataArray.length;
+    const percentage = Math.min(100, Math.round((average / 80) * 100));
+    
+    const meterFill = document.getElementById('setup-mic-meter-fill');
+    if (meterFill) {
+        meterFill.style.width = `${percentage}%`;
+    }
+    
+    requestAnimationFrame(updateSetupMicVolumeMeter);
 }
 
 // Populate dropdown lists of microphones
@@ -202,6 +271,10 @@ async function switchMicrophone(deviceId) {
     const hudSelect = document.getElementById('hud-mic-select');
     if (setupSelect) setupSelect.value = deviceId;
     if (hudSelect) hudSelect.value = deviceId;
+    
+    if (setupMicStream) {
+        startSetupMicPreview();
+    }
     
     if (localStream) {
         localStream.getTracks().forEach(track => track.stop());
@@ -1546,6 +1619,9 @@ setupForm.addEventListener('submit', (e) => {
     localStorage.setItem('neongrid_avatar_url', localPlayer.imageUrl);
     localStorage.setItem('neongrid_color', localPlayer.color);
 
+    // Stop mic preview
+    stopSetupMicPreview();
+
     // Transition to lobby (if not auto-joining, which is handled by the auto-join submit listener)
     if (!window._autoJoinRoomId) {
         setupScreen.classList.add('hidden');
@@ -1558,6 +1634,7 @@ setupForm.addEventListener('submit', (e) => {
 btnBackSetup.addEventListener('click', () => {
     roomLobby.classList.add('hidden');
     setupScreen.classList.remove('hidden');
+    startSetupMicPreview();
 });
 
 // Toggle password field visibility
@@ -2821,5 +2898,6 @@ if (savedName) {
         fetchRooms();
     }
 } else {
+    startSetupMicPreview();
     checkAutoJoin();
 }

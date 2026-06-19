@@ -886,6 +886,27 @@ canvas {
     color: #fff;
 }
 
+/* Microphone Volume Meter styling */
+.setup-mic-meter {
+    width: 100%;
+    height: 8px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 4px;
+    overflow: hidden;
+    position: relative;
+    box-shadow: inset 0 1px 3px rgba(0,0,0,0.5);
+    margin-top: 4px;
+}
+
+.setup-mic-meter-fill {
+    height: 100%;
+    width: 0%;
+    background: #39ff14;
+    box-shadow: 0 0 10px #39ff14, 0 0 20px #39ff14;
+    transition: width 0.08s ease-out;
+}
+
 /* In-game live settings settings-panel */
 .settings-panel {
     width: 100%;
