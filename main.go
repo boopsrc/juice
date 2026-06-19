@@ -53,6 +53,7 @@ type JoinPayload struct {
 	ImageURL string  `json:"imageUrl"`
 	X        float64 `json:"x"`
 	Y        float64 `json:"y"`
+	HP       int     `json:"hp"`
 }
 
 type MovePayload struct {
@@ -93,6 +94,7 @@ type Player struct {
 	X        float64 `json:"x"`
 	Y        float64 `json:"y"`
 	Ping     int     `json:"ping"`
+	HP       int     `json:"hp"`
 }
 
 type ClientMessage struct {
@@ -212,6 +214,7 @@ func (h *Hub) run() {
 					ImageURL: payload.ImageURL,
 					X:        payload.X,
 					Y:        payload.Y,
+					HP:       payload.HP,
 				}
 
 				newPayloadBytes, _ := json.Marshal(payload)
@@ -328,7 +331,23 @@ func (h *Hub) run() {
 
 				h.broadcastToAll(newMsgBytes)
 
-			case "new_drawing", "shoot":
+			case "update_hp":
+				var payload struct {
+					ID string `json:"id"`
+					HP int    `json:"hp"`
+				}
+				if err := json.Unmarshal(msg.Payload, &payload); err == nil {
+					payload.ID = cm.client.id
+					if player, exists := h.players[payload.ID]; exists {
+						player.HP = payload.HP
+					}
+					newPayloadBytes, _ := json.Marshal(payload)
+					msg.Payload = json.RawMessage(newPayloadBytes)
+					newMsgBytes, _ := json.Marshal(msg)
+					h.broadcastToAll(newMsgBytes)
+				}
+
+			case "new_drawing", "shoot", "death":
 				h.broadcastToAll(cm.message)
 			}
 		}

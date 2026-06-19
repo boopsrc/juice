@@ -116,6 +116,7 @@ const SHOOT_COOLDOWN_TIME = 3.0; // 3 seconds cooldown
 let shootCooldownTimer = 0.0;
 const TELEPORT_COOLDOWN_TIME = 4.0; // 4 seconds cooldown
 let teleportCooldownTimer = 0.0;
+const MAX_HP = 3;
 let localFacingDir = { x: 1, y: 0 }; // default facing right
 let selectedAudioDeviceId = localStorage.getItem('neongrid_selected_mic') || 'default';
 let setupMicStream = null;
@@ -452,6 +453,23 @@ function playJoinSound() {
     }
 }
 
+const deathSound = new Audio('enemy-hurt-1.mp3');
+deathSound.volume = 0.6;
+
+function playDeathSound() {
+    try {
+        const sound = deathSound.cloneNode();
+        sound.volume = 0.6;
+        sound.play().catch(err => {
+            console.warn('[Sound] Death sound play blocked by browser policy:', err);
+        });
+    } catch (e) {
+        console.warn('[Sound] Error playing death sound:', e);
+    }
+}
+
+const DEATH_ANIM_DURATION = 1.5; // seconds for death animation before respawn
+
 // Background Music setup
 const bgMusic = new Audio('loop_cminor_124bpm.wav');
 bgMusic.loop = true;
@@ -747,7 +765,7 @@ function connectWebSocket(roomId, password) {
             cleanupAudioAnalysis(peerId);
         }
         for (const peerId in pendingCandidates) {
-            delete pendingCandidates[peerId];
+            delete peerConnections[peerId];
         }
         document.querySelectorAll('audio').forEach(el => el.remove());
         
@@ -833,6 +851,7 @@ function connectWebSocket(roomId, password) {
                             y: p.y,
                             targetX: p.x,
                             targetY: p.y,
+                            hp: p.hp || MAX_HP,
                             chatBubble: null,
                             ping: p.ping || 0,
                             kbX: 0,
@@ -898,6 +917,7 @@ function connectWebSocket(roomId, password) {
                     y: data.y,
                     targetX: data.x,
                     targetY: data.y,
+                    hp: data.hp || MAX_HP,
                     chatBubble: null,
                     ping: data.ping || 0,
                     kbX: 0,
@@ -980,6 +1000,22 @@ function connectWebSocket(roomId, password) {
             case 'update_ping':
                 if (players[data.id]) {
                     players[data.id].ping = data.ping;
+                }
+                break;
+
+            case 'update_hp':
+                if (players[data.id]) {
+                    players[data.id].hp = data.hp;
+                }
+                break;
+
+            case 'death':
+                playDeathSound();
+                // Apply death animation to the dead player
+                if (data.id && players[data.id]) {
+                    players[data.id].isDead = true;
+                    players[data.id].deathTimer = DEATH_ANIM_DURATION;
+                    players[data.id].hp = MAX_HP; // will respawn with full HP
                 }
                 break;
 
@@ -1425,7 +1461,8 @@ btnUpdateImage.addEventListener('click', () => {
                 color: localPlayer.color,
                 imageUrl: localPlayer.imageUrl,
                 x: localPlayer.x,
-                y: localPlayer.y
+                y: localPlayer.y,
+                hp: localPlayer.hp
             }
         }));
     }
@@ -1594,6 +1631,11 @@ async function joinRoom(roomId, password) {
     localPlayer.name = usernameInput.value.trim();
     localPlayer.color = selectedColor;
     localPlayer.imageUrl = imageUrl;
+    localPlayer.x = MAP_SIZE / 2 + (Math.random() - 0.5) * 500;
+    localPlayer.y = MAP_SIZE / 2 + (Math.random() - 0.5) * 500;
+    localPlayer.targetX = localPlayer.x;
+    localPlayer.targetY = localPlayer.y;
+    localPlayer.hp = MAX_HP;
     hudImageUrlInput.value = imageUrl;
 
     if (imageUrl) {
@@ -1609,7 +1651,8 @@ async function joinRoom(roomId, password) {
             color: localPlayer.color,
             imageUrl: localPlayer.imageUrl,
             x: localPlayer.x,
-            y: localPlayer.y
+            y: localPlayer.y,
+            hp: localPlayer.hp
         }
     }));
 
@@ -1623,6 +1666,7 @@ async function joinRoom(roomId, password) {
         y: localPlayer.y,
         targetX: localPlayer.x,
         targetY: localPlayer.y,
+        hp: localPlayer.hp,
         chatBubble: null,
         ping: 0,
         kbX: 0,
@@ -1908,6 +1952,9 @@ function spawnHitParticles(x, y, color) {
 }
 
 function fireShot() {
+    // Cannot shoot while dead
+    if (players[localPlayer.id] && players[localPlayer.id].isDead) return;
+    
     shootCooldownTimer = SHOOT_COOLDOWN_TIME;
     playAttackSound();
     
@@ -2574,13 +2621,18 @@ function update(dt) {
     if (!isJoined) return;
 
     // 1. Calculate local player movement
-    let moveX = mobileMove.x;
-    let moveY = mobileMove.y;
+    // Block movement while dead
+    const isLocalDead = players[localPlayer.id] && players[localPlayer.id].isDead;
+    
+    let moveX = isLocalDead ? 0 : mobileMove.x;
+    let moveY = isLocalDead ? 0 : mobileMove.y;
 
-    if (keys['w'] || keys['ArrowUp']) moveY -= 1;
-    if (keys['s'] || keys['ArrowDown']) moveY += 1;
-    if (keys['a'] || keys['ArrowLeft']) moveX -= 1;
-    if (keys['d'] || keys['ArrowRight']) moveX += 1;
+    if (!isLocalDead) {
+        if (keys['w'] || keys['ArrowUp']) moveY -= 1;
+        if (keys['s'] || keys['ArrowDown']) moveY += 1;
+        if (keys['a'] || keys['ArrowLeft']) moveX -= 1;
+        if (keys['d'] || keys['ArrowRight']) moveX += 1;
+    }
 
     const localIsMoving = moveX !== 0 || moveY !== 0;
 
@@ -2758,6 +2810,18 @@ function update(dt) {
             }
         }
 
+        // Update death animation timer
+        if (p.isDead && p.deathTimer > 0) {
+            p.deathTimer -= dt;
+            if (p.deathTimer <= 0) {
+                p.deathTimer = 0;
+                // For remote players, just clear the dead state
+                if (id !== localPlayer.id) {
+                    p.isDead = false;
+                }
+            }
+        }
+
         if (p.isMoving) {
             addTrailPoint(id, p.x, p.y);
         }
@@ -2859,15 +2923,74 @@ function update(dt) {
             const speed = Math.hypot(shot.vx, shot.vy);
             const dirX = shot.vx / speed;
             const dirY = shot.vy / speed;
+            
+            // Universal HP drop locally for all clients (fixes out-of-sync without server)
+            hitPlayer.hp = (hitPlayer.hp !== undefined ? hitPlayer.hp : MAX_HP) - 1;
 
             if (hitPlayer.id === localPlayer.id) {
                 localPlayer.kbX = dirX * 650;
                 localPlayer.kbY = dirY * 650;
-            }
-
-            if (shot.shooterId === localPlayer.id) {
+                localPlayer.hp = hitPlayer.hp;
+                
+                if (localPlayer.hp <= 0) {
+                    // Start death animation locally
+                    hitPlayer.isDead = true;
+                    hitPlayer.deathTimer = DEATH_ANIM_DURATION;
+                    
+                    // Broadcast death to all clients
+                    if (socket && socket.readyState === WebSocket.OPEN) {
+                        socket.send(JSON.stringify({
+                            type: 'death',
+                            payload: { id: localPlayer.id }
+                        }));
+                    }
+                    
+                    // Schedule respawn after death animation
+                    setTimeout(() => {
+                        localPlayer.hp = MAX_HP;
+                        if (players[localPlayer.id]) {
+                            players[localPlayer.id].hp = MAX_HP;
+                        }
+                        localPlayer.x = MAP_SIZE / 2 + (Math.random() - 0.5) * 500;
+                        localPlayer.y = MAP_SIZE / 2 + (Math.random() - 0.5) * 500;
+                        
+                        if (players[localPlayer.id]) {
+                            players[localPlayer.id].x = localPlayer.x;
+                            players[localPlayer.id].y = localPlayer.y;
+                            players[localPlayer.id].isDead = false;
+                            players[localPlayer.id].deathTimer = 0;
+                        }
+                        
+                        if (socket && socket.readyState === WebSocket.OPEN) {
+                            socket.send(JSON.stringify({
+                                type: 'move',
+                                payload: { id: localPlayer.id, x: localPlayer.x, y: localPlayer.y }
+                            }));
+                            socket.send(JSON.stringify({
+                                type: 'update_hp',
+                                payload: { id: localPlayer.id, hp: localPlayer.hp }
+                            }));
+                        }
+                    }, DEATH_ANIM_DURATION * 1000);
+                } else {
+                    // Not dead yet, just sync HP
+                    if (socket && socket.readyState === WebSocket.OPEN) {
+                        socket.send(JSON.stringify({
+                            type: 'update_hp',
+                            payload: { id: localPlayer.id, hp: localPlayer.hp }
+                        }));
+                    }
+                }
+            } else if (shot.shooterId === localPlayer.id) {
                 localPlayer.kbX = -dirX * 450;
                 localPlayer.kbY = -dirY * 450;
+            }
+            
+            // Universal death animation for non-local players (sound comes from broadcast)
+            if (hitPlayer.hp <= 0 && hitPlayer.id !== localPlayer.id) {
+                hitPlayer.isDead = true;
+                hitPlayer.deathTimer = DEATH_ANIM_DURATION;
+                hitPlayer.hp = MAX_HP;
             }
 
             activeShots.splice(i, 1);
@@ -2973,7 +3096,7 @@ function getOffscreenEdgePosition(screenX, screenY) {
     };
 }
 
-function drawPlayerNamePillAt(ctx, x, y, name, color) {
+function drawPlayerNamePillAt(ctx, x, y, name, color, hp = MAX_HP) {
     ctx.font = 'bold 12px Outfit';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
@@ -2982,12 +3105,31 @@ function drawPlayerNamePillAt(ctx, x, y, name, color) {
     const pillWidth = nameWidth + 16;
     const pillHeight = 18;
 
+    const hpRatio = Math.max(0, Math.min(1, hp / MAX_HP));
+    
+    // Create background fill proportional to HP
+    const bgX = x - pillWidth / 2;
+    const bgY = y - pillHeight / 2;
+    
     ctx.fillStyle = 'rgba(10, 12, 19, 0.8)';
+    ctx.beginPath();
+    ctx.roundRect(bgX, bgY, pillWidth, pillHeight, 9);
+    ctx.fill();
+    
+    // Fill red portion
+    ctx.save();
+    ctx.beginPath();
+    ctx.roundRect(bgX, bgY, pillWidth, pillHeight, 9);
+    ctx.clip();
+    
+    ctx.fillStyle = 'rgba(255, 0, 50, 0.6)';
+    ctx.fillRect(bgX, bgY, pillWidth * hpRatio, pillHeight);
+    ctx.restore();
+
     ctx.strokeStyle = color;
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.roundRect(x - pillWidth / 2, y - pillHeight / 2, pillWidth, pillHeight, 9);
-    ctx.fill();
+    ctx.roundRect(bgX, bgY, pillWidth, pillHeight, 9);
     ctx.stroke();
 
     ctx.fillStyle = '#ffffff';
@@ -3031,7 +3173,7 @@ function drawOffscreenIndicators() {
         // Offset pill inward along the vector opposite to the edge direction
         const pillX = edge.x - Math.cos(edge.angle) * inset;
         const pillY = edge.y - Math.sin(edge.angle) * inset;
-        drawPlayerNamePillAt(ctx, pillX, pillY, p.name, p.color);
+        drawPlayerNamePillAt(ctx, pillX, pillY, p.name, p.color, p.hp !== undefined ? p.hp : MAX_HP);
     }
 }
 
@@ -3350,10 +3492,27 @@ function draw() {
         let bounce = 0;
         let scaleX = 1.0;
         let scaleY = 1.0;
+        let deathRotation = 0;
+        let deathAlpha = 1.0;
         
         const phase = p.animPhase || 0;
         
-        if (p.isMoving) {
+        // Death animation overrides normal animation
+        if (p.isDead && p.deathTimer > 0) {
+            const deathProgress = 1.0 - (p.deathTimer / DEATH_ANIM_DURATION);
+            // Rotate to lie down (0 -> PI/2 = 90 degrees)
+            deathRotation = Math.min(deathProgress * 2.0, 1.0) * (Math.PI / 2);
+            // Flatten vertically as they fall
+            scaleY = 1.0 - Math.min(deathProgress * 1.5, 0.6);
+            // Fade out in the second half
+            if (deathProgress > 0.5) {
+                deathAlpha = 1.0 - ((deathProgress - 0.5) * 2.0);
+            }
+            // Slight bounce on landing
+            if (deathProgress < 0.5) {
+                bounce = Math.sin(deathProgress * Math.PI) * 8;
+            }
+        } else if (p.isMoving) {
             // Hopping walk cycle: Hop Y offset and Squash/Stretch
             bounce = -Math.abs(Math.sin(phase)) * 12; // hop up to 12px
             
@@ -3370,14 +3529,20 @@ function draw() {
         ctx.save();
         // Translate to player position, applying the bounce to Y coordinate
         ctx.translate(p.x, p.y + bounce);
+        
+        // Apply death animation effects
+        if (p.isDead && p.deathTimer > 0) {
+            ctx.globalAlpha = Math.max(0, deathAlpha);
+            ctx.rotate(deathRotation);
+        }
 
         // Draw Player Square Avatar (scale applied individually for Squash and Stretch animation)
         ctx.save();
         ctx.scale(scaleX * (p.elasticX || 1.0), scaleY * (p.elasticY || 1.0));
         
-        ctx.shadowColor = p.color;
-        ctx.shadowBlur = 15;
-        ctx.fillStyle = p.color;
+        ctx.shadowColor = p.isDead ? '#ff0000' : p.color;
+        ctx.shadowBlur = p.isDead ? 25 : 15;
+        ctx.fillStyle = p.isDead ? '#ff0000' : p.color;
         ctx.beginPath();
         ctx.roundRect(-20, -20, 40, 40, 8); // Size 40x40 centered
         ctx.fill();
@@ -3392,6 +3557,11 @@ function draw() {
                 ctx.roundRect(-20, -20, 40, 40, 8);
                 ctx.clip();
                 ctx.drawImage(img, -20, -20, 40, 40);
+                // Red overlay when dead
+                if (p.isDead) {
+                    ctx.fillStyle = 'rgba(255, 0, 0, 0.5)';
+                    ctx.fillRect(-20, -20, 40, 40);
+                }
                 ctx.restore();
             }
         }
@@ -3413,13 +3583,31 @@ function draw() {
 
         const pillHeight = 18;
         const pillY = -37;
+        const hp = p.hp !== undefined ? p.hp : MAX_HP;
+        const hpRatio = Math.max(0, Math.min(1, hp / MAX_HP));
+
+        const bgX = -pillWidth / 2;
+        const bgY = pillY - pillHeight / 2;
 
         ctx.fillStyle = 'rgba(10, 12, 19, 0.8)';
+        ctx.beginPath();
+        ctx.roundRect(bgX, bgY, pillWidth, pillHeight, 9);
+        ctx.fill();
+        
+        ctx.save();
+        ctx.beginPath();
+        ctx.roundRect(bgX, bgY, pillWidth, pillHeight, 9);
+        ctx.clip();
+        
+        // Softer red color for the health bar
+        ctx.fillStyle = 'rgba(255, 30, 60, 0.25)';
+        ctx.fillRect(bgX, bgY, pillWidth * hpRatio, pillHeight);
+        ctx.restore();
+
         ctx.strokeStyle = p.isSpeaking ? '#39ff14' : 'rgba(255, 255, 255, 0.1)';
         ctx.lineWidth = p.isSpeaking ? 1.5 : 1;
         ctx.beginPath();
-        ctx.roundRect(-pillWidth / 2, pillY - pillHeight / 2, pillWidth, pillHeight, 9);
-        ctx.fill();
+        ctx.roundRect(bgX, bgY, pillWidth, pillHeight, 9);
         ctx.stroke();
 
         // If speaking, draw a tiny green vector microphone on the left
