@@ -20,7 +20,13 @@ const localPlayer = {
     x: MAP_SIZE / 2 + (Math.random() - 0.5) * 300, // spawn around center
     y: MAP_SIZE / 2 + (Math.random() - 0.5) * 300,
     speed: 280, // px per second
-    ping: 0
+    ping: 0,
+    kbX: 0,
+    kbY: 0,
+    elasticX: 1.0,
+    elasticY: 1.0,
+    elasticVx: 0.0,
+    elasticVy: 0.0
 };
 
 let pingInterval = null;
@@ -98,6 +104,15 @@ const activeDrawings = {}; // drawingId -> { id, points, color, timer, maxTimer,
 let isDrawing = false;
 let currentDrawingPoints = [];
 let isCollisionEnabled = true;
+
+// Kinetic shot & impact particle variables
+const activeShots = [];
+const particles = [];
+let mouseMapX = MAP_SIZE / 2;
+let mouseMapY = MAP_SIZE / 2;
+const SHOOT_COOLDOWN_TIME = 3.0; // 3 seconds cooldown
+let shootCooldownTimer = 0.0;
+let localFacingDir = { x: 1, y: 0 }; // default facing right
 let selectedAudioDeviceId = localStorage.getItem('neongrid_selected_mic') || 'default';
 let setupMicStream = null;
 let setupAudioAnalyser = null;
@@ -370,6 +385,36 @@ function playCollisionSound() {
         });
     } catch (e) {
         console.warn('[Sound] Error playing collision sound:', e);
+    }
+}
+
+const shootAttackSound = new Audio('attack01.mp3');
+shootAttackSound.volume = 0.5;
+
+function playAttackSound() {
+    try {
+        const sound = shootAttackSound.cloneNode();
+        sound.volume = 0.5;
+        sound.play().catch(err => {
+            console.warn('[Sound] Attack sound play blocked by browser policy:', err);
+        });
+    } catch (e) {
+        console.warn('[Sound] Error playing attack sound:', e);
+    }
+}
+
+const hitDogSound = new Audio('dog-bark.mp3');
+hitDogSound.volume = 0.5;
+
+function playHitSound() {
+    try {
+        const sound = hitDogSound.cloneNode();
+        sound.volume = 0.5;
+        sound.play().catch(err => {
+            console.warn('[Sound] Hit sound play blocked by browser policy:', err);
+        });
+    } catch (e) {
+        console.warn('[Sound] Error playing hit sound:', e);
     }
 }
 
@@ -770,7 +815,13 @@ function connectWebSocket(roomId, password) {
                             targetX: p.x,
                             targetY: p.y,
                             chatBubble: null,
-                            ping: p.ping || 0
+                            ping: p.ping || 0,
+                            kbX: 0,
+                            kbY: 0,
+                            elasticX: 1.0,
+                            elasticY: 1.0,
+                            elasticVx: 0.0,
+                            elasticVy: 0.0
                         };
                         
                         // Prefetch avatar image
@@ -829,7 +880,13 @@ function connectWebSocket(roomId, password) {
                     targetX: data.x,
                     targetY: data.y,
                     chatBubble: null,
-                    ping: data.ping || 0
+                    ping: data.ping || 0,
+                    kbX: 0,
+                    kbY: 0,
+                    elasticX: 1.0,
+                    elasticY: 1.0,
+                    elasticVx: 0.0,
+                    elasticVy: 0.0
                 };
 
                 // Prefetch avatar image
@@ -940,6 +997,33 @@ function connectWebSocket(roomId, password) {
                         maxTimer: 5.0,
                         creatorId: data.creatorId
                     };
+                }
+                break;
+
+            case 'shoot':
+                if (data && data.shooterId !== localPlayer.id) {
+                    activeShots.push({
+                        id: data.id,
+                        shooterId: data.shooterId,
+                        x: data.x,
+                        y: data.y,
+                        vx: data.vx,
+                        vy: data.vy,
+                        color: data.color
+                    });
+                    
+                    // Spatial audio for remote players
+                    const dx = data.x - localPlayer.x;
+                    const dy = data.y - localPlayer.y;
+                    const dist = Math.hypot(dx, dy);
+                    const vol = getSpatialAudioVolume(dist);
+                    if (vol > 0.05) {
+                        try {
+                            const sound = shootAttackSound.cloneNode();
+                            sound.volume = 0.5 * vol;
+                            sound.play().catch(() => {});
+                        } catch(e) {}
+                    }
                 }
                 break;
         }
@@ -1521,7 +1605,13 @@ async function joinRoom(roomId, password) {
         targetX: localPlayer.x,
         targetY: localPlayer.y,
         chatBubble: null,
-        ping: 0
+        ping: 0,
+        kbX: 0,
+        kbY: 0,
+        elasticX: 1.0,
+        elasticY: 1.0,
+        elasticVx: 0.0,
+        elasticVy: 0.0
     };
 
     // Transition to game
@@ -1781,6 +1871,60 @@ function updatePlayersHUD() {
     }
 }
 
+function spawnHitParticles(x, y, color) {
+    for (let i = 0; i < 15; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        const speed = 100 + Math.random() * 200;
+        particles.push({
+            x: x,
+            y: y,
+            vx: Math.cos(angle) * speed,
+            vy: Math.sin(angle) * speed,
+            color: color,
+            size: 2 + Math.random() * 3,
+            life: 0.4 + Math.random() * 0.4,
+            maxLife: 0.8
+        });
+    }
+}
+
+function fireShot() {
+    shootCooldownTimer = SHOOT_COOLDOWN_TIME;
+    playAttackSound();
+    
+    // Fire in the direction the player is currently heading (localFacingDir)
+    const dirX = localFacingDir.x;
+    const dirY = localFacingDir.y;
+    
+    const shotSpeed = 950; // pixels per second
+    const vx = dirX * shotSpeed;
+    const vy = dirY * shotSpeed;
+    
+    const shotId = localPlayer.id + '_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
+    const shotData = {
+        id: shotId,
+        shooterId: localPlayer.id,
+        x: localPlayer.x,
+        y: localPlayer.y,
+        vx: vx,
+        vy: vy,
+        color: localPlayer.color
+    };
+    
+    activeShots.push(shotData);
+    
+    if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({
+            type: 'shoot',
+            payload: shotData
+        }));
+    }
+    
+    // Recoil (shooter pushed back immediately upon firing):
+    localPlayer.kbX = -dirX * 300;
+    localPlayer.kbY = -dirY * 300;
+}
+
 // Keyboard Input Handlers
 window.addEventListener('keydown', (e) => {
     if (isChatting) {
@@ -1788,6 +1932,14 @@ window.addEventListener('keydown', (e) => {
             closeChat(false);
         }
         return; // Don't move while typing
+    }
+
+    if (e.key === '1') {
+        if (isJoined && document.activeElement.tagName !== 'INPUT' && shootCooldownTimer <= 0) {
+            fireShot();
+            e.preventDefault();
+            return;
+        }
     }
 
     if (e.key === 'Enter') {
@@ -1909,9 +2061,11 @@ canvas.addEventListener('pointerdown', (e) => {
 });
 
 canvas.addEventListener('pointermove', (e) => {
-    if (!isDrawing) return;
-    
     const coords = getMapCoordsFromEvent(e);
+    mouseMapX = coords.x;
+    mouseMapY = coords.y;
+
+    if (!isDrawing) return;
     const lastPoint = currentDrawingPoints[currentDrawingPoints.length - 1];
     const dx = coords.x - lastPoint.x;
     const dy = coords.y - lastPoint.y;
@@ -2326,13 +2480,27 @@ function update(dt) {
     const localIsMoving = moveX !== 0 || moveY !== 0;
 
     if (localIsMoving) {
-        // Normalize speed diagonally
         const length = Math.sqrt(moveX * moveX + moveY * moveY);
-        const dx = (moveX / length) * localPlayer.speed * dt;
-        const dy = (moveY / length) * localPlayer.speed * dt;
+        localFacingDir.x = moveX / length;
+        localFacingDir.y = moveY / length;
+    }
 
-        let targetX = localPlayer.x + dx;
-        let targetY = localPlayer.y + dy;
+    const isSliding = (localPlayer.kbX && Math.hypot(localPlayer.kbX, localPlayer.kbY) > 2.0);
+    if (localIsMoving || isSliding) {
+        let dx = 0;
+        let dy = 0;
+        if (localIsMoving) {
+            const length = Math.sqrt(moveX * moveX + moveY * moveY);
+            dx = (moveX / length) * localPlayer.speed;
+            dy = (moveY / length) * localPlayer.speed;
+        }
+
+        // Add knockback velocity
+        const totalVx = dx + (localPlayer.kbX || 0);
+        const totalVy = dy + (localPlayer.kbY || 0);
+
+        let targetX = localPlayer.x + totalVx * dt;
+        let targetY = localPlayer.y + totalVy * dt;
 
         // Constraint check (map boundaries)
         targetX = Math.max(20, Math.min(targetX, MAP_SIZE - 20));
@@ -2351,11 +2519,19 @@ function update(dt) {
                     const collisionX = (localPlayer.x + r > obs.x && localPlayer.x - r < obs.x + obs.w);
                     const collisionY = (localPlayer.y + r > obs.y && localPlayer.y - r < obs.y + obs.h);
                     
-                    if (!collisionY) targetY = localPlayer.y;
-                    else if (!collisionX) targetX = localPlayer.x;
+                    if (!collisionY) {
+                        targetY = localPlayer.y;
+                        localPlayer.kbY = 0;
+                    }
+                    else if (!collisionX) {
+                        targetX = localPlayer.x;
+                        localPlayer.kbX = 0;
+                    }
                     else {
                         targetX = localPlayer.x;
                         targetY = localPlayer.y;
+                        localPlayer.kbX = 0;
+                        localPlayer.kbY = 0;
                     }
                 }
             }
@@ -2393,6 +2569,8 @@ function update(dt) {
                 if (collides) {
                     targetX = localPlayer.x;
                     targetY = localPlayer.y;
+                    localPlayer.kbX = 0;
+                    localPlayer.kbY = 0;
                     break;
                 }
             }
@@ -2417,6 +2595,32 @@ function update(dt) {
     // 2. Interpolate other players movement smoothly (lerping), calculate movement state, anim phases and decrement chat timers
     for (const id in players) {
         const p = players[id];
+
+        // Decay knockback velocity
+        if (p.kbX !== undefined) {
+            p.kbX *= Math.exp(-8 * dt);
+            p.kbY *= Math.exp(-8 * dt);
+            if (Math.abs(p.kbX) < 1) p.kbX = 0;
+            if (Math.abs(p.kbY) < 1) p.kbY = 0;
+        }
+
+        if (id === localPlayer.id) {
+            localPlayer.kbX = p.kbX;
+            localPlayer.kbY = p.kbY;
+            localPlayer.elasticX = p.elasticX;
+            localPlayer.elasticY = p.elasticY;
+            localPlayer.elasticVx = p.elasticVx;
+            localPlayer.elasticVy = p.elasticVy;
+        }
+
+        // Spring simulation for elastic jiggle
+        if (p.elasticX !== undefined) {
+            p.elasticVx += (1.0 - p.elasticX) * 150 * dt - p.elasticVx * 12 * dt;
+            p.elasticX += p.elasticVx * dt;
+
+            p.elasticVy += (1.0 - p.elasticY) * 150 * dt - p.elasticVy * 12 * dt;
+            p.elasticY += p.elasticVy * dt;
+        }
 
         // Determine movement status
         let playerIsMoving = false;
@@ -2495,6 +2699,110 @@ function update(dt) {
         drawing.timer -= dt;
         if (drawing.timer <= 0) {
             delete activeDrawings[drawingId];
+        }
+    }
+
+    // 4. Update active shots
+    const map = MAPS[currentMapIndex];
+    for (let i = activeShots.length - 1; i >= 0; i--) {
+        const shot = activeShots[i];
+        shot.x += shot.vx * dt;
+        shot.y += shot.vy * dt;
+
+        // Boundary check
+        if (shot.x < 0 || shot.x > MAP_SIZE || shot.y < 0 || shot.y > MAP_SIZE) {
+            activeShots.splice(i, 1);
+            continue;
+        }
+
+        // Obstacle collision check
+        let hitObstacle = false;
+        if (map.obstacles) {
+            for (const obs of map.obstacles) {
+                if (shot.x >= obs.x && shot.x <= obs.x + obs.w &&
+                    shot.y >= obs.y && shot.y <= obs.y + obs.h) {
+                    hitObstacle = true;
+                    break;
+                }
+            }
+        }
+        if (hitObstacle) {
+            spawnHitParticles(shot.x, shot.y, shot.color);
+            activeShots.splice(i, 1);
+            continue;
+        }
+
+        // Player collision check
+        let hitPlayer = null;
+        for (const id in players) {
+            if (id === shot.shooterId) continue;
+            const p = players[id];
+            const dx = shot.x - p.x;
+            const dy = shot.y - p.y;
+            if (Math.abs(dx) < 22 && Math.abs(dy) < 22) {
+                hitPlayer = p;
+                break;
+            }
+        }
+
+        if (hitPlayer) {
+            spawnHitParticles(shot.x, shot.y, shot.color);
+            playHitSound();
+
+            hitPlayer.elasticX = 1.8;
+            hitPlayer.elasticY = 0.4;
+
+            const speed = Math.hypot(shot.vx, shot.vy);
+            const dirX = shot.vx / speed;
+            const dirY = shot.vy / speed;
+
+            if (hitPlayer.id === localPlayer.id) {
+                localPlayer.kbX = dirX * 650;
+                localPlayer.kbY = dirY * 650;
+            }
+
+            if (shot.shooterId === localPlayer.id) {
+                localPlayer.kbX = -dirX * 450;
+                localPlayer.kbY = -dirY * 450;
+            }
+
+            activeShots.splice(i, 1);
+            continue;
+        }
+    }
+
+    // 5. Update hit particles
+    for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+        p.life -= dt;
+        if (p.life <= 0) {
+            particles.splice(i, 1);
+        }
+    }
+
+    // 6. Update shooting cooldown timer and HUD visual state
+    if (shootCooldownTimer > 0) {
+        shootCooldownTimer -= dt;
+        if (shootCooldownTimer < 0) shootCooldownTimer = 0;
+
+        const slot = document.getElementById('weapon-slot-1');
+        const overlay = document.getElementById('cooldown-overlay-1');
+        const timer = document.getElementById('cooldown-timer-1');
+        if (slot && overlay && timer) {
+            slot.classList.add('cooldown');
+            overlay.style.width = `${(shootCooldownTimer / SHOOT_COOLDOWN_TIME) * 100}%`;
+            timer.innerText = `${shootCooldownTimer.toFixed(1)}s`;
+        }
+    } else {
+        const slot = document.getElementById('weapon-slot-1');
+        const overlay = document.getElementById('cooldown-overlay-1');
+        const timer = document.getElementById('cooldown-timer-1');
+        if (slot && overlay && timer) {
+            slot.classList.remove('cooldown');
+            overlay.style.width = '0%';
+            timer.innerText = 'Pronto';
         }
     }
 }
@@ -2677,6 +2985,47 @@ function draw() {
     // 3.6 Draw movement trails
     drawTrails();
 
+    // Draw active kinetic shots
+    activeShots.forEach(shot => {
+        ctx.save();
+        ctx.shadowColor = shot.color;
+        ctx.shadowBlur = 15;
+        
+        const speed = Math.hypot(shot.vx, shot.vy);
+        const dirX = shot.vx / speed;
+        const dirY = shot.vy / speed;
+        const len = 15;
+
+        ctx.strokeStyle = hexToRgba(shot.color, 0.4);
+        ctx.lineWidth = 8;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(shot.x - dirX * len, shot.y - dirY * len);
+        ctx.lineTo(shot.x, shot.y);
+        ctx.stroke();
+
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(shot.x - dirX * len * 0.7, shot.y - dirY * len * 0.7);
+        ctx.lineTo(shot.x, shot.y);
+        ctx.stroke();
+
+        ctx.restore();
+    });
+
+    // Draw hit particles
+    particles.forEach(p => {
+        ctx.save();
+        ctx.shadowColor = p.color;
+        ctx.shadowBlur = 8;
+        ctx.fillStyle = hexToRgba(p.color, p.life / p.maxLife);
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+    });
+
     // 4. Draw players (boxes, name labels, and floating chat bubbles)
     for (const id in players) {
         const p = players[id];
@@ -2708,7 +3057,7 @@ function draw() {
 
         // Draw Player Square Avatar (scale applied individually for Squash and Stretch animation)
         ctx.save();
-        ctx.scale(scaleX, scaleY);
+        ctx.scale(scaleX * (p.elasticX || 1.0), scaleY * (p.elasticY || 1.0));
         
         ctx.shadowColor = p.color;
         ctx.shadowBlur = 15;

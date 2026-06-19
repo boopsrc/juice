@@ -328,7 +328,7 @@ func (h *Hub) run() {
 
 				h.broadcastToAll(newMsgBytes)
 
-			case "new_drawing":
+			case "new_drawing", "shoot":
 				h.broadcastToAll(cm.message)
 			}
 		}
