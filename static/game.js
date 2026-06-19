@@ -98,7 +98,127 @@ const activeDrawings = {}; // drawingId -> { id, points, color, timer, maxTimer,
 let isDrawing = false;
 let currentDrawingPoints = [];
 let isCollisionEnabled = true;
+let selectedAudioDeviceId = localStorage.getItem('neongrid_selected_mic') || 'default';
 const camera = { x: 0, y: 0 };
+
+// Load cached profile on start
+function loadCachedProfile() {
+    const cachedName = localStorage.getItem('neongrid_username');
+    const cachedAvatar = localStorage.getItem('neongrid_avatar_url');
+    const cachedColor = localStorage.getItem('neongrid_color');
+    
+    if (cachedName) {
+        usernameInput.value = cachedName;
+        localPlayer.name = cachedName;
+    }
+    if (cachedAvatar) {
+        lobbyImageUrlInput.value = cachedAvatar;
+        localPlayer.imageUrl = cachedAvatar;
+        hudImageUrlInput.value = cachedAvatar;
+    }
+    if (cachedColor) {
+        selectedColor = cachedColor;
+        localPlayer.color = cachedColor;
+        
+        // Update active swatch in UI
+        swatches.forEach(swatch => {
+            if (swatch.getAttribute('data-color') === cachedColor) {
+                swatch.classList.add('active');
+            } else {
+                swatch.classList.remove('active');
+            }
+        });
+        
+        // Update custom color picker if it is custom
+        const presetColors = ['#00f0ff', '#ff007f', '#39ff14', '#ffb700', '#bd00ff', '#ff3333'];
+        if (!presetColors.includes(cachedColor)) {
+            customColorWrapper.classList.add('active');
+            customColorInput.value = cachedColor;
+        } else {
+            customColorWrapper.classList.remove('active');
+        }
+    }
+}
+
+// Populate dropdown lists of microphones
+async function populateMicrophoneSelectors() {
+    try {
+        let devices = await navigator.mediaDevices.enumerateDevices();
+        let audioInputs = devices.filter(device => device.kind === 'audioinput');
+        
+        // If there are audio inputs but labels are empty, try requesting permission
+        const hasNoLabels = audioInputs.length > 0 && audioInputs.every(d => !d.label);
+        if (hasNoLabels) {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                stream.getTracks().forEach(track => track.stop());
+                devices = await navigator.mediaDevices.enumerateDevices();
+                audioInputs = devices.filter(device => device.kind === 'audioinput');
+            } catch (err) {
+                console.warn('Microphone permission denied when enumerating:', err);
+            }
+        }
+        
+        const setupSelect = document.getElementById('setup-mic-select');
+        const hudSelect = document.getElementById('hud-mic-select');
+        
+        const populateSelect = (selectEl) => {
+            if (!selectEl) return;
+            selectEl.innerHTML = '';
+            
+            // Add a default option
+            const defaultOpt = document.createElement('option');
+            defaultOpt.value = 'default';
+            defaultOpt.text = 'Dispositivo Padrão';
+            if (selectedAudioDeviceId === 'default') {
+                defaultOpt.selected = true;
+            }
+            selectEl.appendChild(defaultOpt);
+            
+            audioInputs.forEach((device, index) => {
+                const option = document.createElement('option');
+                option.value = device.deviceId;
+                option.text = device.label || `Microfone ${index + 1}`;
+                if (device.deviceId === selectedAudioDeviceId) {
+                    option.selected = true;
+                }
+                selectEl.appendChild(option);
+            });
+        };
+        
+        populateSelect(setupSelect);
+        populateSelect(hudSelect);
+    } catch (err) {
+        console.error('Error populating microphone selectors:', err);
+    }
+}
+
+// Switch microphone on request
+async function switchMicrophone(deviceId) {
+    selectedAudioDeviceId = deviceId;
+    localStorage.setItem('neongrid_selected_mic', deviceId);
+    
+    const setupSelect = document.getElementById('setup-mic-select');
+    const hudSelect = document.getElementById('hud-mic-select');
+    if (setupSelect) setupSelect.value = deviceId;
+    if (hudSelect) hudSelect.value = deviceId;
+    
+    if (localStream) {
+        localStream.getTracks().forEach(track => track.stop());
+        localStream = null;
+        
+        if (isMicEnabled) {
+            isMicEnabled = false;
+            await toggleMicrophone();
+        } else {
+            cleanupAudioAnalysis('local');
+            btnToggleMic.innerText = 'Ativar Microfone';
+            btnToggleMic.className = 'btn-hud mic-off';
+            voiceStatus.innerText = 'Mutado';
+            voiceIndicator.className = 'pulse-indicator-voice voice-muted';
+        }
+    }
+}
 
 const trails = {}; // playerId -> [{ x, y, t }]
 const trailLastSample = {};
@@ -981,7 +1101,16 @@ async function toggleMicrophone() {
             btnToggleMic.innerText = 'Permitindo...';
             console.log('[WebRTC] Requesting local audio device...');
             
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            let stream;
+            try {
+                const constraints = {
+                    audio: selectedAudioDeviceId && selectedAudioDeviceId !== 'default' ? { deviceId: { exact: selectedAudioDeviceId } } : true
+                };
+                stream = await navigator.mediaDevices.getUserMedia(constraints);
+            } catch (e) {
+                console.warn('Failed to open selected microphone, falling back to default:', e);
+                stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            }
             localStream = stream;
             isMicEnabled = true;
 
@@ -1108,6 +1237,7 @@ window.addEventListener('keydown', resumeAudioOnGesture);
 btnUpdateImage.addEventListener('click', () => {
     const newUrl = hudImageUrlInput.value.trim();
     localPlayer.imageUrl = newUrl;
+    localStorage.setItem('neongrid_avatar_url', newUrl);
     
     // Broadcast own update by sending a join event with updated imageUrl
     if (socket && socket.readyState === WebSocket.OPEN) {
@@ -1230,7 +1360,16 @@ async function joinRoom(roomId, password) {
     // Prompt for mic access
     try {
         console.log('[Lobby] Prompting for microphone permission...');
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        let stream;
+        try {
+            const constraints = {
+                audio: selectedAudioDeviceId && selectedAudioDeviceId !== 'default' ? { deviceId: { exact: selectedAudioDeviceId } } : true
+            };
+            stream = await navigator.mediaDevices.getUserMedia(constraints);
+        } catch (e) {
+            console.warn('Failed to open selected microphone, falling back to default:', e);
+            stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        }
         localStream = stream;
         isMicEnabled = false;
         stream.getTracks().forEach(t => t.enabled = false);
@@ -1402,10 +1541,17 @@ setupForm.addEventListener('submit', (e) => {
     localPlayer.color = selectedColor;
     localPlayer.imageUrl = lobbyImageUrlInput.value.trim();
 
-    // Transition to lobby
-    setupScreen.classList.add('hidden');
-    roomLobby.classList.remove('hidden');
-    fetchRooms();
+    // Save profile to cache
+    localStorage.setItem('neongrid_username', nickname);
+    localStorage.setItem('neongrid_avatar_url', localPlayer.imageUrl);
+    localStorage.setItem('neongrid_color', localPlayer.color);
+
+    // Transition to lobby (if not auto-joining, which is handled by the auto-join submit listener)
+    if (!window._autoJoinRoomId) {
+        setupScreen.classList.add('hidden');
+        roomLobby.classList.remove('hidden');
+        fetchRooms();
+    }
 });
 
 // Back button
@@ -2642,5 +2788,38 @@ function gameLoop(timestamp) {
     }
 }
 
-// Bootstrap — check if URL contains ?room=ID for auto-join
-checkAutoJoin();
+// Bootstrap
+loadCachedProfile();
+populateMicrophoneSelectors();
+navigator.mediaDevices.addEventListener('devicechange', populateMicrophoneSelectors);
+
+const setupMicSelect = document.getElementById('setup-mic-select');
+if (setupMicSelect) {
+    setupMicSelect.addEventListener('change', (e) => {
+        switchMicrophone(e.target.value);
+    });
+    setupMicSelect.addEventListener('focus', populateMicrophoneSelectors);
+}
+const hudMicSelect = document.getElementById('hud-mic-select');
+if (hudMicSelect) {
+    hudMicSelect.addEventListener('change', (e) => {
+        switchMicrophone(e.target.value);
+    });
+}
+
+// Redirect or Auto-join based on profile presence
+const savedName = localStorage.getItem('neongrid_username');
+const urlParams = new URLSearchParams(window.location.search);
+const directRoomId = urlParams.get('room');
+
+if (savedName) {
+    if (directRoomId) {
+        checkAutoJoin();
+    } else {
+        setupScreen.classList.add('hidden');
+        roomLobby.classList.remove('hidden');
+        fetchRooms();
+    }
+} else {
+    checkAutoJoin();
+}

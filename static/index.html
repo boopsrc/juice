@@ -44,6 +44,13 @@
                 </div>
                 
                 <div class="form-group">
+                    <label for="setup-mic-select">Selecione seu Microfone</label>
+                    <select id="setup-mic-select" class="select-hud">
+                        <option value="default">Dispositivo Padrão</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
                     <label>Selecione a Cor do seu Avatar</label>
                     <div class="color-palette">
                         <button type="button" class="color-swatch active" style="--swatch-color: #00f0ff;" data-color="#00f0ff"></button>
@@ -174,6 +181,12 @@
                             <input type="url" id="hud-image-url" placeholder="https://exemplo.com/foto.png" autocomplete="off">
                             <button id="btn-update-image">Ok</button>
                         </div>
+                    </div>
+                    <div class="form-group-compact" style="margin-top: 10px;">
+                        <label for="hud-mic-select">Microfone</label>
+                        <select id="hud-mic-select" class="select-hud">
+                            <option value="default">Dispositivo Padrão</option>
+                        </select>
                     </div>
                     <div style="margin-top: 12px;">
                         <button id="btn-toggle-music" class="btn-hud music-on">Música: Ligada</button>

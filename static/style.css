@@ -861,6 +861,31 @@ canvas {
     box-shadow: 0 0 10px rgba(255, 51, 85, 0.3);
 }
 
+.select-hud {
+    width: 100%;
+    padding: 12px 16px;
+    background: rgba(0, 0, 0, 0.35);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    color: #fff;
+    font-family: var(--font-sans);
+    font-size: 0.95rem;
+    transition: all 0.3s ease;
+    outline: none;
+    cursor: pointer;
+}
+
+.select-hud:focus {
+    border-color: var(--primary-color);
+    box-shadow: 0 0 12px rgba(0, 240, 255, 0.2);
+    background: rgba(0, 0, 0, 0.5);
+}
+
+.select-hud option {
+    background-color: #0c0e17;
+    color: #fff;
+}
+
 /* In-game live settings settings-panel */
 .settings-panel {
     width: 100%;
