@@ -327,6 +327,9 @@ func (h *Hub) run() {
 				newMsgBytes, _ := json.Marshal(msg)
 
 				h.broadcastToAll(newMsgBytes)
+
+			case "new_drawing":
+				h.broadcastToAll(cm.message)
 			}
 		}
 	}

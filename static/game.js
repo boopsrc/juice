@@ -94,6 +94,9 @@ const MAPS = [
 let currentMapIndex = 0;
 
 const players = {}; // stores all player states: { id: { id, name, color, imageUrl, x, y, targetX, targetY, chatBubble } }
+const activeDrawings = {}; // drawingId -> { id, points, color, timer, maxTimer, creatorId }
+let isDrawing = false;
+let currentDrawingPoints = [];
 const camera = { x: 0, y: 0 };
 
 const trails = {}; // playerId -> [{ x, y, t }]
@@ -731,6 +734,19 @@ function connectWebSocket(roomId, password) {
                 clearPlayerTrail(data.id);
                 delete players[data.id];
                 updatePlayersHUD();
+                break;
+
+            case 'new_drawing':
+                if (data && data.points && data.points.length >= 2) {
+                    activeDrawings[data.id] = {
+                        id: data.id,
+                        points: data.points,
+                        color: data.color,
+                        timer: 5.0,
+                        maxTimer: 5.0,
+                        creatorId: data.creatorId
+                    };
+                }
                 break;
         }
     };
@@ -1626,12 +1642,74 @@ if (btnMobileChatToggle && chatWrapper) {
     });
 }
 
-// Blur focus closure
-canvas.addEventListener('mousedown', () => {
+// Blur focus closure & Drawing pointer listeners
+function getMapCoordsFromEvent(e) {
+    const rect = canvas.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+    return {
+        x: mouseX + camera.x,
+        y: mouseY + camera.y
+    };
+}
+
+canvas.addEventListener('pointerdown', (e) => {
     if (isChatting) {
         closeChat(false);
+        return;
+    }
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    
+    isDrawing = true;
+    const coords = getMapCoordsFromEvent(e);
+    currentDrawingPoints = [{ x: coords.x, y: coords.y }];
+    
+    try {
+        canvas.setPointerCapture(e.pointerId);
+    } catch(err) {}
+});
+
+canvas.addEventListener('pointermove', (e) => {
+    if (!isDrawing) return;
+    
+    const coords = getMapCoordsFromEvent(e);
+    const lastPoint = currentDrawingPoints[currentDrawingPoints.length - 1];
+    const dx = coords.x - lastPoint.x;
+    const dy = coords.y - lastPoint.y;
+    if (dx * dx + dy * dy > 15 * 15) {
+        const constrainedX = Math.max(0, Math.min(coords.x, MAP_SIZE));
+        const constrainedY = Math.max(0, Math.min(coords.y, MAP_SIZE));
+        currentDrawingPoints.push({ x: constrainedX, y: constrainedY });
     }
 });
+
+function endDrawing(e) {
+    if (!isDrawing) return;
+    isDrawing = false;
+    
+    try {
+        canvas.releasePointerCapture(e.pointerId);
+    } catch(err) {}
+    
+    if (currentDrawingPoints.length >= 2) {
+        const drawingId = localPlayer.id + '_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+        if (socket && socket.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify({
+                type: 'new_drawing',
+                payload: {
+                    id: drawingId,
+                    creatorId: localPlayer.id,
+                    points: currentDrawingPoints,
+                    color: localPlayer.color
+                }
+            }));
+        }
+    }
+    currentDrawingPoints = [];
+}
+
+canvas.addEventListener('pointerup', endDrawing);
+canvas.addEventListener('pointercancel', endDrawing);
 
 // Chat management
 const chatInputContainer = document.getElementById('chat-input-container');
@@ -1852,6 +1930,24 @@ function lightenHex(hex, amount = 0.32) {
     return `#${mix(r).toString(16).padStart(2, '0')}${mix(g).toString(16).padStart(2, '0')}${mix(b).toString(16).padStart(2, '0')}`;
 }
 
+function getClosestPointOnSegment(px, py, ax, ay, bx, by) {
+    const abx = bx - ax;
+    const aby = by - ay;
+    const apx = px - ax;
+    const apy = py - ay;
+    
+    const abLenSq = abx * abx + aby * aby;
+    if (abLenSq === 0) return { x: ax, y: ay };
+    
+    let t = (apx * abx + apy * aby) / abLenSq;
+    t = Math.max(0, Math.min(1, t));
+    
+    return {
+        x: ax + t * abx,
+        y: ay + t * aby
+    };
+}
+
 function addTrailPoint(playerId, x, y) {
     const last = trailLastSample[playerId];
     if (last) {
@@ -2026,6 +2122,41 @@ function update(dt) {
             }
         }
 
+        // Drawings collision check (hard lock/trava for other players only, creator is unaffected)
+        for (const drawingId in activeDrawings) {
+            const drawing = activeDrawings[drawingId];
+            if (drawing.creatorId === localPlayer.id) continue;
+            
+            const points = drawing.points;
+            if (points.length < 2) continue;
+            
+            const r = 20; // Player radius
+            let collides = false;
+            for (let i = 0; i < points.length - 1; i++) {
+                const p0 = points[i];
+                const p1 = points[i + 1];
+                
+                const closestNew = getClosestPointOnSegment(targetX, targetY, p0.x, p0.y, p1.x, p1.y);
+                const distNew = Math.hypot(targetX - closestNew.x, targetY - closestNew.y);
+                
+                if (distNew < r) {
+                    const closestPrev = getClosestPointOnSegment(localPlayer.x, localPlayer.y, p0.x, p0.y, p1.x, p1.y);
+                    const distPrev = Math.hypot(localPlayer.x - closestPrev.x, localPlayer.y - closestPrev.y);
+                    
+                    // Only block if moving to targetX/targetY gets closer to the drawing
+                    if (distNew < distPrev) {
+                        collides = true;
+                        break;
+                    }
+                }
+            }
+            if (collides) {
+                targetX = localPlayer.x;
+                targetY = localPlayer.y;
+                break;
+            }
+        }
+
         localPlayer.x = targetX;
         localPlayer.y = targetY;
 
@@ -2116,6 +2247,15 @@ function update(dt) {
     for (const key of currentCollisions) {
         activeCollisions.add(key);
     }
+
+    // Update active drawings timers
+    for (const drawingId in activeDrawings) {
+        const drawing = activeDrawings[drawingId];
+        drawing.timer -= dt;
+        if (drawing.timer <= 0) {
+            delete activeDrawings[drawingId];
+        }
+    }
 }
 
 // Render 2D space
@@ -2188,6 +2328,109 @@ function draw() {
             ctx.strokeRect(obs.x, obs.y, obs.w, obs.h);
         }
         ctx.shadowBlur = 0;
+    }
+
+    // 3.55 Draw active drawings on background
+    for (const drawingId in activeDrawings) {
+        const drawing = activeDrawings[drawingId];
+        const points = drawing.points;
+        if (points.length < 2) continue;
+        
+        const color = drawing.color;
+        let alpha = 1.0;
+        if (drawing.timer < 1.0) {
+            alpha = drawing.timer;
+        }
+        
+        ctx.save();
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        
+        // 1. Thick outer glow
+        ctx.shadowColor = color;
+        ctx.shadowBlur = 20 * alpha;
+        ctx.strokeStyle = hexToRgba(color, 0.2 * alpha);
+        ctx.lineWidth = 12;
+        ctx.beginPath();
+        ctx.moveTo(points[0].x, points[0].y);
+        for (let i = 1; i < points.length; i++) {
+            ctx.lineTo(points[i].x, points[i].y);
+        }
+        ctx.stroke();
+        
+        // 2. Medium glow
+        ctx.shadowBlur = 10 * alpha;
+        ctx.strokeStyle = hexToRgba(color, 0.5 * alpha);
+        ctx.lineWidth = 6;
+        ctx.beginPath();
+        ctx.moveTo(points[0].x, points[0].y);
+        for (let i = 1; i < points.length; i++) {
+            ctx.lineTo(points[i].x, points[i].y);
+        }
+        ctx.stroke();
+        
+        // 3. Bright inner core
+        ctx.shadowBlur = 4 * alpha;
+        ctx.strokeStyle = hexToRgba('#ffffff', 0.9 * alpha);
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(points[0].x, points[0].y);
+        for (let i = 1; i < points.length; i++) {
+            ctx.lineTo(points[i].x, points[i].y);
+        }
+        ctx.stroke();
+        
+        ctx.restore();
+        
+        // Draw countdown timer at the middle of the drawing path
+        const midIndex = Math.floor(points.length / 2);
+        const midPoint = points[midIndex];
+        
+        ctx.save();
+        ctx.font = 'bold 11px Outfit';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        
+        const timerText = `${drawing.timer.toFixed(1)}s`;
+        const textWidth = ctx.measureText(timerText).width;
+        const pillW = textWidth + 12;
+        const pillH = 16;
+        
+        let pillAlpha = 0.85;
+        if (drawing.timer < 1.0) {
+            pillAlpha = 0.85 * drawing.timer;
+        }
+        ctx.globalAlpha = pillAlpha;
+        
+        // Pill background
+        ctx.fillStyle = 'rgba(10, 12, 19, 0.85)';
+        ctx.strokeStyle = hexToRgba(color, 0.6);
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.roundRect(midPoint.x - pillW / 2, midPoint.y - pillH / 2 - 15, pillW, pillH, 6);
+        ctx.fill();
+        ctx.stroke();
+        
+        // Timer text
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(timerText, midPoint.x, midPoint.y - 15);
+        ctx.restore();
+    }
+    
+    // Draw current drawing in progress (local user visual helper)
+    if (isDrawing && currentDrawingPoints.length >= 2) {
+        ctx.save();
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.strokeStyle = hexToRgba(localPlayer.color, 0.7);
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.moveTo(currentDrawingPoints[0].x, currentDrawingPoints[0].y);
+        for (let i = 1; i < currentDrawingPoints.length; i++) {
+            ctx.lineTo(currentDrawingPoints[i].x, currentDrawingPoints[i].y);
+        }
+        ctx.stroke();
+        ctx.restore();
     }
 
     // 3.6 Draw movement trails
